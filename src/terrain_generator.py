@@ -10,18 +10,16 @@ import numpy as np
 from noise import pnoise2
 
 
-def _generar_heightmap(
-    tamano: int, seed: int, escala: float, amplitud: int, nivel_base: int
-) -> np.ndarray:
-    """Genera una grilla de alturas con ruido Perlin, redondeada a enteros."""
-    base = seed % 256  # 'noise' usa un entero 0-255 para variar el patrón
+def _generar_heightmap(tamano, offset_x, offset_y, escala, amplitud, nivel_base):
+    """
+    Genera un heightmap de tamaño `tamano x tamano` usando ruido Perlin.
+    """
     alturas = np.zeros((tamano, tamano), dtype=float)
     for i in range(tamano):
         for j in range(tamano):
-            ruido = pnoise2(i / escala, j / escala, octaves=4, base=base)
+            ruido = pnoise2(i / escala + offset_x, j / escala + offset_y, octaves=4)
             alturas[i, j] = nivel_base + ruido * amplitud
     return np.round(alturas).astype(int)
-
 
 def _redondear_preservando_suma(valores: np.ndarray, suma_objetivo: int) -> np.ndarray:
     """
@@ -86,8 +84,10 @@ def generar_terreno(
         con sum(alturas) == sum(objetivo) garantizado.
     """
     rng = np.random.default_rng(seed)
+    
+    offset_x, offset_y = rng.uniform(0, 1000, size=2)
 
-    alturas = _generar_heightmap(tamano, seed, escala, amplitud, nivel_base)
+    alturas = _generar_heightmap(tamano, offset_x, offset_y, escala, amplitud, nivel_base)
 
     pendiente_x = rng.uniform(-pendiente_maxima, pendiente_maxima)
     pendiente_y = rng.uniform(-pendiente_maxima, pendiente_maxima)

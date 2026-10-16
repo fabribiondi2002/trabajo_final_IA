@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import networkx as nx
 import numpy as np
-
+from src.utils import distancia_manhattan
 
 @dataclass(frozen=True)
 class Flujo:
@@ -23,11 +23,6 @@ class Flujo:
     origen: tuple[int, int]   # coordenada (fila, col) de la zona alta
     destino: tuple[int, int]  # coordenada (fila, col) de la zona baja
     volumen: int
-
-
-def _distancia(a: tuple[int, int], b: tuple[int, int]) -> int:
-    """Distancia Manhattan entre dos celdas de la grilla."""
-    return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
 def calcular_excedentes_y_deficits(
@@ -66,9 +61,7 @@ def resolver_transportation_problem(
     volumen) que minimizan el costo total de mover tierra.
 
     Lanza ValueError si el terreno no está balanceado (suma de excedentes
-    != suma de déficits) — en este proyecto el generador de terrenos
-    sintéticos se encarga de garantizar el balance (ver Project Charter,
-    sección "Origen y Naturaleza de los Datos").
+    != suma de déficits).
     """
     excedentes, deficits = calcular_excedentes_y_deficits(alturas, objetivo)
 
@@ -103,11 +96,15 @@ def resolver_transportation_problem(
                 ("alto", celda_alta),
                 ("bajo", celda_baja),
                 capacity=min(volumen_alto, volumen_bajo, capacidad_maxima),
-                weight=_distancia(celda_alta, celda_baja),
+                weight=distancia_manhattan(celda_alta, celda_baja),
             )
-
+    # Devuelve los flujos resultantes de la asignación
+    # origen -> destino optimo
     flujo_resultado = nx.min_cost_flow(grafo)
 
+    # Pasa el grafo a la lista del flujo 
+    # seleccionando solo los flujos de celda alta a baja
+    # y con volumen mayor a 0
     flujos: list[Flujo] = []
     for nodo_origen, destinos in flujo_resultado.items():
         if nodo_origen[0] != "alto":
