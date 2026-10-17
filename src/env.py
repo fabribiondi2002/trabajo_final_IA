@@ -58,6 +58,25 @@ def inicializar_estado_celdas(viajes: list[Viaje]) -> dict[tuple[int, int], Esta
 
     return estado_celdas
 
+def _actualizar_celda(estado: EstadoCelda, volumen: int) -> None:
+    """
+    Un viaje toca esta celda: extrae la capa fértil si hacía falta y descuenta volumen.
+    Cambia el estado de la celda
+    """
+    if estado.fertil == EstadoTierraFertil.IN_SITU:
+        estado.fertil = EstadoTierraFertil.EXTRAIDA
+    estado.volumen_pendiente -= volumen
+    if estado.volumen_pendiente == 0:
+        estado.fertil = EstadoTierraFertil.REPUESTA
+
+
+def aplicar_viaje_a_celdas(estado_celdas: dict[tuple[int, int], EstadoCelda], viaje: Viaje) -> None:
+    """
+    Actualiza origen y destino del viaje.
+    """
+    for celda in (viaje.origen, viaje.destino):
+        _actualizar_celda(estado_celdas[celda], viaje.volumen)
+
 class TerrainLevelingEnv(gym.Env):
     """
     Entorno de Gym para el problema de nivelación de terreno.
@@ -69,6 +88,8 @@ class TerrainLevelingEnv(gym.Env):
         max_viajes: int = 50,
         tamano_pool: int = 200,
         master_seed: int = 0,
+        peso_distancia: float = 1.0,
+        bonus_final: float = 1.0,
     ):
         super().__init__()
         self.tamano = tamano
@@ -87,6 +108,9 @@ class TerrainLevelingEnv(gym.Env):
         ## Se contruye el pool de test y el de entrenamiento.
         self.pool_test = self._construir_entradas(list(SEMILLAS_TEST))
         self.pool_entrenamiento = self._construir_pool(tamano_pool)
+
+        self.peso_distancia = peso_distancia
+        self.bonus_final = bonus_final
 
     def _viajes_de_semilla(self, seed: int) -> tuple[Viaje, ...] | None:
         """
@@ -147,3 +171,104 @@ class TerrainLevelingEnv(gym.Env):
                 pool.append(EntradaPool(seed=seed, viajes=viajes))
         return pool
 
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
+        ## Usar una entrada especifica del conjunto de test
+        if options is not None and "entrada" in options:
+            entrada = options["entrada"]
+        ## Usar una entrada de entrenamiento aleatoria del pool
+        else:
+            indice = int(self.np_random.integers(len(self.pool_entrenamiento)))
+            entrada = self.pool_entrenamiento[indice]
+
+        self.entrada_actual = entrada
+        self.viajes = list(entrada.viajes)
+        self.completados = [False] * len(self.viajes)
+        self.estado_celdas = inicializar_estado_celdas(self.viajes)
+        self.posicion = (0, 0)
+        self.costo_acumulado = 0.0
+
+        return self._armar_observacion(), self._armar_info()
+
+    def _armar_info(self) -> dict:
+        """
+        Devuelve un diccionario con información adicional sobre el estado del entorno.
+        """
+        return {
+            "seed_terreno": self.entrada_actual.seed,
+            "n_viajes": len(self.viajes),
+            "mascara_acciones": self._mascara_acciones(),
+        }
+
+    def _mascara_acciones(self) -> np.ndarray:
+        """
+        Devuelve un array booleano de tamaño max_viajes donde:
+        True = acción válida (viaje pendiente). 
+        False = Completados y padding."""
+        mascara = np.zeros(self.max_viajes, dtype=bool)
+        for i, completado in enumerate(self.completados):
+            mascara[i] = not completado
+        return mascara
+
+    def _armar_observacion(self) -> np.ndarray:
+        """
+        Arma la observación del entorno como un vector de floats normalizados
+        [pos_x, pos_y] + 6 valores por viaje:
+        (origen_x, origen_y, destino_x, destino_y, volumen, dist. máquina->origen).
+        """
+        lado = max(self.tamano - 1, 1)
+        obs = np.zeros(2 + 6 * self.max_viajes, dtype=np.float32)
+        ## normaliza la posicion de la máquina
+        obs[0] = self.posicion[0] / lado
+        obs[1] = self.posicion[1] / lado
+        ## normaliza los datos de los viajes pendientes
+        for i, viaje in enumerate(self.viajes):
+            if self.completados[i]:
+                continue
+            base = 2 + 6 * i
+            obs[base] = viaje.origen[0] / lado
+            obs[base + 1] = viaje.origen[1] / lado
+            obs[base + 2] = viaje.destino[0] / lado
+            obs[base + 3] = viaje.destino[1] / lado
+            obs[base + 4] = viaje.volumen / self.capacidad_maquina
+            obs[base + 5] = distancia_manhattan(self.posicion, viaje.origen) / (2 * lado)
+        return obs
+
+    def step(self, action: int):
+        """
+        Ejecuta un paso en el entorno: la máquina realiza el viaje correspondiente a la acción.
+        Devuelve la nueva observación, la recompensa, si el episodio terminó,
+        si se truncó y un diccionario con información adicional.
+        """
+        action = int(action)
+        if not (0 <= action < self.max_viajes) or action >= len(self.viajes) or self.completados[action]:
+            raise ValueError(f"Acción inválida: {action}. Usar la máscara de acciones.")
+
+        viaje = self.viajes[action]
+
+        # La máquina va hasta el origen y luego lleva la carga al destino.
+        distancia = (
+            distancia_manhattan(self.posicion, viaje.origen)
+            + distancia_manhattan(viaje.origen, viaje.destino)
+        )
+        # actualiza el costo acumulado y la posición de la máquina
+        self.costo_acumulado += distancia
+        self.posicion = viaje.destino
+
+        # actualiza el estado de la capa fértil y volúmenes pendientes.
+        aplicar_viaje_a_celdas(self.estado_celdas, viaje)
+        self.completados[action] = True
+
+        lado = max(self.tamano - 1, 1)
+        # Calcula la recompensa: negativa proporcional a la distancia recorrida, 
+        # más un bonus si se completan todos los viajes.
+        reward = -self.peso_distancia * distancia / (2 * lado)
+
+        terminated = all(self.completados)
+        if terminated:
+            reward += self.bonus_final
+
+        info = self._armar_info()
+        info["distancia_paso"] = distancia
+        info["costo_acumulado"] = self.costo_acumulado
+        return self._armar_observacion(), float(reward), terminated, False, info
