@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.agent import QNetwork, ReplayBuffer, seleccionar_accion, calcular_objetivo, paso_de_aprendizaje
+from src.agent import QNetwork, QNetworkPorViaje, ReplayBuffer, seleccionar_accion, calcular_objetivo, paso_de_aprendizaje
 from src.env import TerrainLevelingEnv
 
 
@@ -233,3 +233,47 @@ def test_la_perdida_baja_al_repetir_el_mismo_lote():
     for _ in range(300):
         ultima = paso_de_aprendizaje(red, objetivo, opt, lote, 0.99)
     assert ultima < primera * 0.1
+
+# ---------- QNetworkPorViaje
+
+def test_red_por_viaje_devuelve_un_q_por_viaje():
+    red = QNetworkPorViaje(obs_dim=2 + 6 * 5, n_acciones=5)
+    assert red(torch.zeros(4, 32)).shape == (4, 5)
+
+
+def test_red_por_viaje_rechaza_dimensiones_incoherentes():
+    with pytest.raises(ValueError):
+        QNetworkPorViaje(obs_dim=10, n_acciones=5)
+
+
+def test_red_por_viaje_puntua_igual_un_viaje_en_cualquier_ranura():
+    torch.manual_seed(0)
+    red = QNetworkPorViaje(obs_dim=2 + 6 * 3, n_acciones=3)
+    pos, viaje = torch.rand(1, 2), torch.rand(1, 6)
+    a = torch.cat([pos, viaje, torch.zeros(1, 12)], dim=1)   # el viaje en la ranura 0
+    b = torch.cat([pos, torch.zeros(1, 12), viaje], dim=1)   # el mismo viaje en la ranura 2
+    assert red(a)[0, 0].item() == pytest.approx(red(b)[0, 2].item())
+
+
+def test_red_por_viaje_el_puntaje_depende_de_la_posicion_de_la_maquina():
+    torch.manual_seed(0)
+    red = QNetworkPorViaje(obs_dim=2 + 6 * 2, n_acciones=2)
+    viajes = torch.rand(1, 12)
+    a = torch.cat([torch.zeros(1, 2), viajes], dim=1)
+    b = torch.cat([torch.ones(1, 2), viajes], dim=1)
+    assert not torch.allclose(red(a), red(b))
+
+
+def test_red_por_viaje_el_puntaje_de_un_viaje_no_depende_de_los_otros():
+    torch.manual_seed(0)
+    red = QNetworkPorViaje(obs_dim=2 + 6 * 3, n_acciones=3)
+    pos, v0 = torch.rand(1, 2), torch.rand(1, 6)
+    a = torch.cat([pos, v0, torch.rand(1, 12)], dim=1)
+    b = torch.cat([pos, v0, torch.rand(1, 12)], dim=1)       # mismos datos en la ranura 0, otros distintos
+    assert red(a)[0, 0].item() == pytest.approx(red(b)[0, 0].item())
+
+
+def test_gradientes_llegan_a_todas_las_capas_de_la_red_por_viaje():
+    red = QNetworkPorViaje(obs_dim=2 + 6 * 4, n_acciones=4)
+    red(torch.rand(3, 26)).sum().backward()
+    assert all(p.grad is not None and p.grad.abs().sum() > 0 for p in red.parameters())

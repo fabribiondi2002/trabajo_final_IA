@@ -13,8 +13,7 @@ import numpy as np
 from src.baseline import evaluar_baseline
 from src.env import EntradaPool, TerrainLevelingEnv
 from src.evaluation import ResultadoEvaluacion, costos_referencia, resumir
-from src.train import ConfigEntrenamiento, entrenar, evaluar_red, guardar_historial
-
+from src.train import ARQUITECTURAS, ConfigEntrenamiento, entrenar, evaluar_red, guardar_historial
 logger = logging.getLogger(__name__)
 
 
@@ -112,10 +111,22 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Entrena con varias seeds y resume los resultados en test.")
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
     parser.add_argument("--carpeta", default="models/base")
+    parser.add_argument("--arquitectura", choices=sorted(ARQUITECTURAS), default="plana")
     parser.add_argument("--episodios", type=int, default=ConfigEntrenamiento().episodios)
+    parser.add_argument("--oculta", type=int, default=ConfigEntrenamiento().oculta)
+    parser.add_argument("--lr", type=float, default=ConfigEntrenamiento().lr)
+    parser.add_argument("--evaluar-cada", type=int, default=ConfigEntrenamiento().evaluar_cada)
+    parser.add_argument("--peso-distancia", type=float, default=1.0, help="escala del reward (parámetro del entorno)")
     args = parser.parse_args()
 
-    entorno = TerrainLevelingEnv()
-    cfg = ConfigEntrenamiento(episodios=args.episodios)
+    entorno = TerrainLevelingEnv(peso_distancia=args.peso_distancia)
+    cfg = ConfigEntrenamiento(
+        arquitectura=args.arquitectura,
+        episodios=args.episodios,
+        episodios_decay=args.episodios // 2,
+        oculta=args.oculta,
+        lr=args.lr,
+        evaluar_cada=args.evaluar_cada,
+    )
     resultados = correr_experimento(entorno, cfg, args.seeds, args.carpeta)
     print(formatear_experimento(resultados, resumir_experimento(resultados)))

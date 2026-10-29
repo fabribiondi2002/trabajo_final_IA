@@ -7,7 +7,7 @@ from src.agent import QNetwork
 from src.env import TerrainLevelingEnv
 from src.train import (
     ConfigEntrenamiento, cargar_modelo, correr_agente, entrenar,
-    epsilon_en, evaluar_red, guardar_modelo,
+    epsilon_en, evaluar_red, guardar_modelo, crear_red
 )
 from src.train import cargar_historial, guardar_historial 
 
@@ -162,3 +162,55 @@ def test_el_historial_de_un_entrenamiento_real_se_puede_guardar_y_cargar(env, tm
     assert cargado["validacion"] == hist["validacion"]
     assert cargado["mejor_costo_validacion"] == hist["mejor_costo_validacion"]
     assert np.allclose(cargado["perdida"], hist["perdida"], equal_nan=True)
+
+def test_crear_red_devuelve_la_arquitectura_pedida(env):
+    from src.agent import QNetworkPorViaje
+    obs, n = env.observation_space.shape[0], env.action_space.n
+    assert type(crear_red(obs, n, 16, "plana")) is QNetwork
+    assert type(crear_red(obs, n, 16, "por_viaje")) is QNetworkPorViaje
+
+
+def test_crear_red_con_arquitectura_desconocida_lanza_error(env):
+    with pytest.raises(ValueError):
+        crear_red(env.observation_space.shape[0], env.action_space.n, 16, "otra")
+
+
+@pytest.mark.parametrize("arquitectura", ["plana", "por_viaje"])
+def test_guardar_y_cargar_conserva_la_arquitectura(env, tmp_path, arquitectura):
+    torch.manual_seed(0)
+    cfg = cfg_chica(tmp_path, arquitectura=arquitectura)
+    red = crear_red(env.observation_space.shape[0], env.action_space.n, cfg.oculta, arquitectura)
+    guardar_modelo(red, cfg.ruta_modelo, cfg, costo_validacion=1.0)
+    cargada, meta = cargar_modelo(cfg.ruta_modelo)
+    assert type(cargada) is type(red)
+    x = torch.rand(3, env.observation_space.shape[0])
+    assert torch.equal(red(x), cargada(x))
+    assert meta["config"]["arquitectura"] == arquitectura
+
+
+def test_un_modelo_guardado_sin_campo_arquitectura_se_carga_como_plana(env, tmp_path):
+    cfg = cfg_chica(tmp_path)
+    red = QNetwork(env.observation_space.shape[0], env.action_space.n, cfg.oculta)
+    guardar_modelo(red, cfg.ruta_modelo, cfg, costo_validacion=1.0)
+    datos = torch.load(cfg.ruta_modelo, weights_only=False)
+    del datos["config"]["arquitectura"]
+    torch.save(datos, cfg.ruta_modelo)
+    assert type(cargar_modelo(cfg.ruta_modelo)[0]) is QNetwork
+
+
+def test_entrenar_con_la_red_por_viaje_corre_y_es_reproducible(env, tmp_path):
+    cfg = cfg_chica(arquitectura="por_viaje", seed=5)
+    red, a = entrenar(env, cfg)
+    _, b = entrenar(env, cfg)
+    from src.agent import QNetworkPorViaje
+    assert isinstance(red, QNetworkPorViaje)
+    assert a["recompensa"] == b["recompensa"] and a["validacion"] == b["validacion"]
+
+
+def test_entrenar_crea_la_red_y_la_red_objetivo_con_la_misma_arquitectura(env, monkeypatch):
+    import src.train as modulo
+    pedidas = []
+    real = modulo.crear_red
+    monkeypatch.setattr(modulo, "crear_red", lambda o, n, h, arq: (pedidas.append(arq), real(o, n, h, arq))[1])
+    entrenar(env, cfg_chica(arquitectura="por_viaje", episodios=1, evaluar_cada=1))
+    assert pedidas == ["por_viaje", "por_viaje"]

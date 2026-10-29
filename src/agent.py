@@ -13,6 +13,7 @@ class QNetwork(nn.Module):
 
     def __init__(self, obs_dim: int, n_acciones: int, oculta: int = 128):
         super().__init__()
+        self.obs_dim, self.n_acciones, self.oculta = obs_dim, n_acciones, oculta
         self.red = nn.Sequential(
             nn.Linear(obs_dim, oculta),
             nn.ReLU(),
@@ -24,6 +25,35 @@ class QNetwork(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.red(x)
 
+class QNetworkPorViaje(nn.Module):
+    """
+    Misma interfaz que QNetwork, pero la misma mini-red puntúa
+    cada viaje por separado usando solo sus 6 features y la posición de la máquina
+    así lo aprendido sobre un viaje vale para todas las ranuras, y no depende del orden.
+    """
+
+    FEATURES_POR_VIAJE = 6
+    GLOBALES = 2
+
+    def __init__(self, obs_dim: int, n_acciones: int, oculta: int = 128):
+        super().__init__()
+        if obs_dim != self.GLOBALES + self.FEATURES_POR_VIAJE * n_acciones:
+            raise ValueError("obs_dim no coincide con 2 + 6 * n_acciones.")
+        self.obs_dim, self.n_acciones, self.oculta = obs_dim, n_acciones, oculta
+        self.red = nn.Sequential(
+            nn.Linear(self.GLOBALES + self.FEATURES_POR_VIAJE, oculta),
+            nn.ReLU(),
+            nn.Linear(oculta, oculta),
+            nn.ReLU(),
+            nn.Linear(oculta, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        lote = x.shape[0]
+        posicion = x[:, : self.GLOBALES]                                                        
+        viajes = x[:, self.GLOBALES :].reshape(lote, self.n_acciones, self.FEATURES_POR_VIAJE)  
+        posicion = posicion.unsqueeze(1).expand(-1, self.n_acciones, -1)                        
+        return self.red(torch.cat([posicion, viajes], dim=2)).squeeze(2)                       
 
 class ReplayBuffer:
     """

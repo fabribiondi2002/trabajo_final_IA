@@ -7,7 +7,7 @@ import torch
 import math
 import json
 
-from src.agent import QNetwork, ReplayBuffer, paso_de_aprendizaje, seleccionar_accion
+from src.agent import QNetwork, ReplayBuffer, QNetworkPorViaje, paso_de_aprendizaje, seleccionar_accion
 from src.env import EntradaPool, TerrainLevelingEnv
 
 logger = logging.getLogger(__name__)
@@ -27,9 +27,17 @@ class ConfigEntrenamiento:
     sincronizar_cada: int = 500        # pasos entre copias red -> red objetivo
     empezar_a_aprender: int = 1000     # experiencias mínimas antes de aprender
     evaluar_cada: int = 100            # episodios entre evaluaciones en validación
+    arquitectura: str = "plana"  
     seed: int = 0
     ruta_modelo: str | None = "models/dqn.pt"
 
+ARQUITECTURAS = {"plana": QNetwork, "por_viaje": QNetworkPorViaje}
+
+def crear_red(obs_dim: int, n_acciones: int, oculta: int, arquitectura: str):
+    """Crea la red de la arquitectura pedida."""
+    if arquitectura not in ARQUITECTURAS:
+        raise ValueError(f"Arquitectura desconocida: {arquitectura}")
+    return ARQUITECTURAS[arquitectura](obs_dim, n_acciones, oculta)
 
 def epsilon_en(episodio: int, cfg: ConfigEntrenamiento) -> float:
     """Decaimiento lineal de epsilon; se queda en el mínimo después de episodios_decay."""
@@ -59,8 +67,8 @@ def guardar_modelo(red: QNetwork, ruta: str, cfg: ConfigEntrenamiento, costo_val
     torch.save(
         {
             "state_dict": red.state_dict(),
-            "obs_dim": red.red[0].in_features,
-            "n_acciones": red.red[-1].out_features,
+            "obs_dim": red.obs_dim,
+            "n_acciones": red.n_acciones,
             "oculta": cfg.oculta,
             "config": asdict(cfg),
             "costo_validacion": costo_validacion,
@@ -72,7 +80,7 @@ def guardar_modelo(red: QNetwork, ruta: str, cfg: ConfigEntrenamiento, costo_val
 def cargar_modelo(ruta: str) -> tuple[QNetwork, dict]:
     """Reconstruye la red guardada. Devuelve (red, metadatos)."""
     datos = torch.load(ruta, map_location="cpu", weights_only=False)
-    red = QNetwork(datos["obs_dim"], datos["n_acciones"], datos["oculta"])
+    red = crear_red(datos["obs_dim"], datos["n_acciones"], datos["oculta"], datos["config"].get("arquitectura", "plana"))
     red.load_state_dict(datos["state_dict"])
     red.eval()
     return red, datos
@@ -108,28 +116,34 @@ def entrenar(
     env: TerrainLevelingEnv, cfg: ConfigEntrenamiento = ConfigEntrenamiento()
 ) -> tuple[QNetwork, dict[str, list]]:
     """Entrena el DQN; se queda con la mejor red según validación. Devuelve (red, historial)."""
+    # Se crea la seed
     torch.manual_seed(cfg.seed)
     rng = np.random.default_rng(cfg.seed)
+    # se asignan dimensiones de observación y número de acciones
     obs_dim = env.observation_space.shape[0]
     n_acciones = env.action_space.n
 
-    red = QNetwork(obs_dim, n_acciones, cfg.oculta)
-    red_objetivo = QNetwork(obs_dim, n_acciones, cfg.oculta)
+    # Se crea la red, la red objetivo, el optimizador y el buffer de replay
+    red = crear_red(obs_dim, n_acciones, cfg.oculta, cfg.arquitectura)
+    red_objetivo = crear_red(obs_dim, n_acciones, cfg.oculta, cfg.arquitectura)
     red_objetivo.load_state_dict(red.state_dict())
     optimizador = torch.optim.Adam(red.parameters(), lr=cfg.lr)
     buffer = ReplayBuffer(cfg.capacidad_buffer, obs_dim, n_acciones, seed=cfg.seed)
 
+    #Se inicializa el historial y se guardan los mejores pesos
     historial: dict[str, list] = {"recompensa": [], "costo": [], "perdida": [], "validacion": []}
     mejor_costo = float("inf")
     mejores_pesos = {k: v.clone() for k, v in red.state_dict().items()}
     pasos = 0
 
     for episodio in range(cfg.episodios):
+        # Se resetea el entorno y se inicializan variables
         obs, info = env.reset(seed=cfg.seed if episodio == 0 else None)
         epsilon = epsilon_en(episodio, cfg)
         terminado, recompensa, perdidas = False, 0.0, []
 
         while not terminado:
+            # Se selecciona la acción, se ejecuta en el entorno y se agrega al buffer
             accion = seleccionar_accion(red, obs, info["mascara_acciones"], epsilon, rng)
             obs_sig, reward, terminado, _, info_sig = env.step(accion)
             buffer.agregar(obs, accion, reward, obs_sig, terminado, info_sig["mascara_acciones"])
@@ -144,10 +158,12 @@ def entrenar(
             if pasos % cfg.sincronizar_cada == 0:
                 red_objetivo.load_state_dict(red.state_dict())
 
+        # Se guarda el historial del episodio
         historial["recompensa"].append(recompensa)
         historial["costo"].append(env.costo_acumulado)
         historial["perdida"].append(float(np.mean(perdidas)) if perdidas else float("nan"))
 
+        # Se evalúa en validación y se guarda el mejor modelo
         if (episodio + 1) % cfg.evaluar_cada == 0:
             costo_val = float(np.mean(evaluar_red(env, red, env.pool_validacion)))
             historial["validacion"].append((episodio + 1, costo_val))
@@ -160,7 +176,8 @@ def entrenar(
                 mejores_pesos = {k: v.clone() for k, v in red.state_dict().items()}
                 if cfg.ruta_modelo:
                     guardar_modelo(red, cfg.ruta_modelo, cfg, costo_val)
-
+                    
+    # Se queda con la mejor red y devuelve el historial
     red.load_state_dict(mejores_pesos)
     red.eval()
     historial["mejor_costo_validacion"] = [mejor_costo]
