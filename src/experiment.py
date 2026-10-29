@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from src.baseline import evaluar_baseline
-from src.env import EntradaPool, TerrainLevelingEnv
+from src.env import RECOMPENSAS, EntradaPool, TerrainLevelingEnv
 from src.evaluation import ResultadoEvaluacion, costos_referencia, resumir
 from src.train import ARQUITECTURAS, ConfigEntrenamiento, entrenar, evaluar_red, guardar_historial
 logger = logging.getLogger(__name__)
@@ -117,9 +117,11 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=ConfigEntrenamiento().lr)
     parser.add_argument("--evaluar-cada", type=int, default=ConfigEntrenamiento().evaluar_cada)
     parser.add_argument("--peso-distancia", type=float, default=1.0, help="escala del reward (parámetro del entorno)")
+    parser.add_argument("--recompensa", choices=RECOMPENSAS, default="total", help="qué tramos castiga el reward")
+    parser.add_argument("--paciencia", type=int, default=None, help="parar si la validación no mejora en N evaluaciones seguidas")
     args = parser.parse_args()
 
-    entorno = TerrainLevelingEnv(peso_distancia=args.peso_distancia)
+    entorno = TerrainLevelingEnv(peso_distancia=args.peso_distancia, recompensa=args.recompensa)
     cfg = ConfigEntrenamiento(
         arquitectura=args.arquitectura,
         episodios=args.episodios,
@@ -127,6 +129,7 @@ if __name__ == "__main__":
         oculta=args.oculta,
         lr=args.lr,
         evaluar_cada=args.evaluar_cada,
+        paciencia=args.paciencia,
     )
     resultados = correr_experimento(entorno, cfg, args.seeds, args.carpeta)
     print(formatear_experimento(resultados, resumir_experimento(resultados)))

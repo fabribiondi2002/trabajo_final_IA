@@ -214,3 +214,59 @@ def test_entrenar_crea_la_red_y_la_red_objetivo_con_la_misma_arquitectura(env, m
     monkeypatch.setattr(modulo, "crear_red", lambda o, n, h, arq: (pedidas.append(arq), real(o, n, h, arq))[1])
     entrenar(env, cfg_chica(arquitectura="por_viaje", episodios=1, evaluar_cada=1))
     assert pedidas == ["por_viaje", "por_viaje"]
+
+# ---------- parada anticipada
+def costos_simulados(monkeypatch, costos):
+    """Hace que cada evaluación en validación devuelva el siguiente valor de la lista."""
+    import src.train as modulo
+    pendientes = iter(costos)
+    monkeypatch.setattr(modulo, "evaluar_red", lambda env, red, entradas: [next(pendientes)])
+
+
+def test_sin_paciencia_se_entrenan_todos_los_episodios(env):
+    _, hist = entrenar(env, cfg_chica(episodios=6, evaluar_cada=3))
+    assert len(hist["recompensa"]) == 6 and hist["episodios_entrenados"] == [6]
+
+
+def test_para_cuando_la_validacion_no_mejora_durante_la_paciencia(env, monkeypatch):
+    costos_simulados(monkeypatch, [5.0, 6.0, 7.0, 1.0, 1.0, 1.0])
+    _, hist = entrenar(env, cfg_chica(episodios=30, evaluar_cada=2, paciencia=2))
+    assert hist["episodios_entrenados"] == [6]                    # evaluaciones en 2, 4 y 6: el 4 y el 6 no mejoran
+    assert len(hist["recompensa"]) == 6
+    assert [e for e, _ in hist["validacion"]] == [2, 4, 6]
+    assert hist["mejor_costo_validacion"] == [5.0]
+
+
+def test_una_mejora_reinicia_la_cuenta_de_paciencia(env, monkeypatch):
+    costos_simulados(monkeypatch, [5.0, 6.0, 4.0, 6.0, 7.0, 0.0])
+    _, hist = entrenar(env, cfg_chica(episodios=30, evaluar_cada=2, paciencia=2))
+    assert hist["episodios_entrenados"] == [10]                   # 6 (sin mejora 1) -> 4 mejora -> 6 y 7 sin mejora
+    assert hist["mejor_costo_validacion"] == [4.0]
+
+
+def test_la_primera_evaluacion_no_cuenta_como_falta_de_mejora(env, monkeypatch):
+    costos_simulados(monkeypatch, [9.0, 8.0, 7.0, 6.0])
+    _, hist = entrenar(env, cfg_chica(episodios=8, evaluar_cada=2, paciencia=1))
+    assert hist["episodios_entrenados"] == [8]                    # mejora siempre: nunca se corta
+
+
+def test_con_paciencia_mayor_a_las_evaluaciones_no_corta(env, monkeypatch):
+    costos_simulados(monkeypatch, [5.0, 6.0, 7.0])
+    _, hist = entrenar(env, cfg_chica(episodios=6, evaluar_cada=2, paciencia=5))
+    assert hist["episodios_entrenados"] == [6]
+
+
+def test_con_parada_anticipada_se_devuelve_la_mejor_red_no_la_ultima(env, tmp_path):
+    cfg = cfg_chica(tmp_path, episodios=30, evaluar_cada=2, paciencia=2)
+    red, hist = entrenar(env, cfg)
+    costo = float(np.mean(evaluar_red(env, red, env.pool_validacion)))
+    assert costo == pytest.approx(hist["mejor_costo_validacion"][0])
+
+
+def test_el_historial_con_parada_anticipada_se_guarda_y_se_carga(env, monkeypatch, tmp_path):
+    costos_simulados(monkeypatch, [5.0, 6.0, 7.0])
+    cfg = cfg_chica(episodios=30, evaluar_cada=2, paciencia=2)
+    _, hist = entrenar(env, cfg)
+    guardar_historial(hist, str(tmp_path / "h.json"), cfg)
+    cargado, config = cargar_historial(str(tmp_path / "h.json"))
+    assert cargado["episodios_entrenados"] == [6] and config["paciencia"] == 2

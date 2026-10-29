@@ -40,6 +40,11 @@ class EntradaPool:
     seed: int
     viajes: tuple[Viaje, ...]
 
+# Tipo de recompensa
+# Total toma en cuenta todas las distancias recorridas.
+# Vacio solo toma la distancia entre un viaje y el siguiente elegido
+RECOMPENSAS = ("total", "vacio")
+
 def inicializar_estado_celdas(viajes: list[Viaje]) -> dict[tuple[int, int], EstadoCelda]:
     """
     Recorre los viajes y arma un EstadoCelda por cada celda involucrada
@@ -91,8 +96,13 @@ class TerrainLevelingEnv(gym.Env):
         master_seed: int = 0,
         peso_distancia: float = 1.0,
         bonus_final: float = 1.0,
+        recompensa: str = "total"
     ):
         super().__init__()
+        if recompensa not in RECOMPENSAS:
+            raise ValueError(f"Recompensa desconocida: {recompensa}. Opciones: {RECOMPENSAS}")
+        
+        self.recompensa = recompensa
         self.tamano = tamano
         self.capacidad_maquina = capacidad_maquina
         self.max_viajes = max_viajes
@@ -249,10 +259,9 @@ class TerrainLevelingEnv(gym.Env):
         viaje = self.viajes[action]
 
         # La máquina va hasta el origen y luego lleva la carga al destino.
-        distancia = (
-            distancia_manhattan(self.posicion, viaje.origen)
-            + distancia_manhattan(viaje.origen, viaje.destino)
-        )
+        tramo_vacio = distancia_manhattan(self.posicion, viaje.origen)
+        distancia = tramo_vacio + distancia_manhattan(viaje.origen, viaje.destino)
+
         # actualiza el costo acumulado y la posición de la máquina
         self.costo_acumulado += distancia
         self.posicion = viaje.destino
@@ -264,7 +273,9 @@ class TerrainLevelingEnv(gym.Env):
         lado = max(self.tamano - 1, 1)
         # Calcula la recompensa: negativa proporcional a la distancia recorrida, 
         # más un bonus si se completan todos los viajes.
-        reward = -self.peso_distancia * distancia / (2 * lado)
+        # Si la recompensa es vacio solo toma la distancia entre viajes
+        costo_del_reward = tramo_vacio if self.recompensa == "vacio" else distancia
+        reward = -self.peso_distancia * costo_del_reward / (2 * lado)
 
         terminated = all(self.completados)
         if terminated:

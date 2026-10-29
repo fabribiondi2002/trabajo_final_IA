@@ -180,3 +180,67 @@ def test_el_orden_de_los_viajes_cambia_el_costo(env):
             _, _, terminated, _, _ = env.step(a)
         costos.append(env.costo_acumulado)
     assert costos[0] != costos[1]
+
+# ---------- recompensa "vacio" (solo castiga el tramo en vacío)
+def entorno_con(recompensa):
+    e = TerrainLevelingEnv(tamano=6, capacidad_maquina=5, max_viajes=60, tamano_pool=5, master_seed=1, recompensa=recompensa)
+    e.reset(seed=0)
+    return e
+
+
+def test_la_recompensa_por_defecto_es_total(env):
+    assert env.recompensa == "total"
+
+
+def test_recompensa_desconocida_lanza_error():
+    with pytest.raises(ValueError):
+        TerrainLevelingEnv(tamano=6, capacidad_maquina=5, max_viajes=60, tamano_pool=2, recompensa="otra")
+
+
+def test_reward_vacio_es_solo_el_tramo_en_vacio_normalizado():
+    e = entorno_con("vacio")
+    lado = e.tamano - 1
+    v = e.viajes[0]
+    esperado = -distancia_manhattan((0, 0), v.origen) / (2 * lado)
+    _, reward, terminated, _, _ = e.step(0)
+    assert not terminated
+    assert reward == pytest.approx(esperado)
+
+
+def test_reward_vacio_no_cambia_el_costo_que_se_mide():
+    a, b = entorno_con("total"), entorno_con("vacio")
+    _, _, _, _, info_a = a.step(0)
+    _, _, _, _, info_b = b.step(0)
+    assert info_a["distancia_paso"] == info_b["distancia_paso"]
+    assert a.costo_acumulado == b.costo_acumulado
+
+
+def test_reward_total_de_un_episodio_en_vacio_es_menos_los_tramos_vacios_mas_bonus():
+    e = entorno_con("vacio")
+    lado = e.tamano - 1
+    vacios, total, terminated = 0, 0.0, False
+    while not terminated:
+        accion = primera_valida(e)
+        vacios += distancia_manhattan(e.posicion, e.viajes[accion].origen)
+        _, r, terminated, _, _ = e.step(accion)
+        total += r
+    cargados = sum(distancia_manhattan(v.origen, v.destino) for v in e.viajes)
+    assert e.costo_acumulado == vacios + cargados
+    assert total == pytest.approx(-vacios / (2 * lado) + e.bonus_final)
+
+
+def test_la_diferencia_entre_ambas_recompensas_es_la_misma_para_cualquier_orden():
+    """Es la razón por la que el mejor orden no cambia: el tramo cargado suma lo mismo siempre."""
+    def retorno(recompensa, elegir):
+        e = entorno_con(recompensa)
+        total, terminated = 0.0, False
+        while not terminated:
+            _, r, terminated, _, _ = e.step(elegir(e))
+            total += r
+        return total
+
+    primero = primera_valida
+    ultimo = lambda e: int(np.flatnonzero(e._mascara_acciones())[-1])
+    dif_primero = retorno("total", primero) - retorno("vacio", primero)
+    dif_ultimo = retorno("total", ultimo) - retorno("vacio", ultimo)
+    assert dif_primero == pytest.approx(dif_ultimo)

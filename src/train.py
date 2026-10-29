@@ -27,6 +27,7 @@ class ConfigEntrenamiento:
     sincronizar_cada: int = 500        # pasos entre copias red -> red objetivo
     empezar_a_aprender: int = 1000     # experiencias mínimas antes de aprender
     evaluar_cada: int = 100            # episodios entre evaluaciones en validación
+    paciencia: int | None = None       # episodios sin mejora antes de detener el entrenamiento
     arquitectura: str = "plana"  
     seed: int = 0
     ruta_modelo: str | None = "models/dqn.pt"
@@ -135,6 +136,8 @@ def entrenar(
     mejor_costo = float("inf")
     mejores_pesos = {k: v.clone() for k, v in red.state_dict().items()}
     pasos = 0
+    evaluaciones_sin_mejora = 0
+    episodios_hechos = 0
 
     for episodio in range(cfg.episodios):
         # Se resetea el entorno y se inicializan variables
@@ -157,7 +160,7 @@ def entrenar(
                 )
             if pasos % cfg.sincronizar_cada == 0:
                 red_objetivo.load_state_dict(red.state_dict())
-
+        episodios_hechos = episodio + 1
         # Se guarda el historial del episodio
         historial["recompensa"].append(recompensa)
         historial["costo"].append(env.costo_acumulado)
@@ -172,15 +175,26 @@ def entrenar(
                 episodio + 1, epsilon, costo_val, float(np.mean(historial["recompensa"][-cfg.evaluar_cada:])),
             )
             if costo_val < mejor_costo:
+                # Se actualiza el mejor modelo y se reinicia el contador de evaluaciones sin mejora
+                evaluaciones_sin_mejora = 0
                 mejor_costo = costo_val
                 mejores_pesos = {k: v.clone() for k, v in red.state_dict().items()}
                 if cfg.ruta_modelo:
                     guardar_modelo(red, cfg.ruta_modelo, cfg, costo_val)
-                    
+            else:
+                # Se incrementa el contador de evaluaciones sin mejora y se detiene si se supera la paciencia
+                evaluaciones_sin_mejora += 1
+                if cfg.paciencia is not None and evaluaciones_sin_mejora >= cfg.paciencia:
+                    logger.info(
+                        "Parada anticipada en el episodio %d: %d evaluaciones sin mejorar (mejor costo %.2f).",
+                        episodios_hechos, evaluaciones_sin_mejora, mejor_costo,
+                    )
+                    break
     # Se queda con la mejor red y devuelve el historial
     red.load_state_dict(mejores_pesos)
     red.eval()
     historial["mejor_costo_validacion"] = [mejor_costo]
+    historial["episodios_entrenados"] = [episodios_hechos]
     return red, historial
 
 
