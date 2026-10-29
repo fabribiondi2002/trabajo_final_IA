@@ -4,6 +4,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import math
+import json
 
 from src.agent import QNetwork, ReplayBuffer, paso_de_aprendizaje, seleccionar_accion
 from src.env import EntradaPool, TerrainLevelingEnv
@@ -75,6 +77,32 @@ def cargar_modelo(ruta: str) -> tuple[QNetwork, dict]:
     red.eval()
     return red, datos
 
+def guardar_historial(historial: dict[str, list], ruta: str, cfg: ConfigEntrenamiento) -> None:
+    """
+    Guarda el historial de un entrenamiento (y su configuración) como JSON, para poder
+    graficar la curva de aprendizaje sin reentrenar. Los NaN se guardan como null.
+    """
+    def limpio(valor):
+        if isinstance(valor, float) and math.isnan(valor):
+            return None
+        if isinstance(valor, (list, tuple)):
+            return [limpio(v) for v in valor]
+        return valor
+
+    Path(ruta).parent.mkdir(parents=True, exist_ok=True)
+    contenido = {"config": asdict(cfg), "historial": {k: limpio(v) for k, v in historial.items()}}
+    with open(ruta, "w", encoding="utf-8") as archivo:
+        json.dump(contenido, archivo, indent=2)
+
+
+def cargar_historial(ruta: str) -> tuple[dict[str, list], dict]:
+    """Lee lo que guardó guardar_historial. Devuelve (historial, config)."""
+    with open(ruta, encoding="utf-8") as archivo:
+        contenido = json.load(archivo)
+    historial = contenido["historial"]
+    historial["perdida"] = [float("nan") if v is None else v for v in historial["perdida"]]
+    historial["validacion"] = [tuple(par) for par in historial["validacion"]]
+    return historial, contenido["config"]
 
 def entrenar(
     env: TerrainLevelingEnv, cfg: ConfigEntrenamiento = ConfigEntrenamiento()
@@ -141,7 +169,13 @@ def entrenar(
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # Crea el entorno
     entorno = TerrainLevelingEnv()
-    red_final, hist = entrenar(entorno)
+    # Configura el entrenamiento
+    cfg = ConfigEntrenamiento()
+    # Entrena y guarda el modelo, guarda el entrenamiento en el historial
+    red_final, hist = entrenar(entorno, cfg)
+    guardar_historial(hist, "models/historial.json", cfg)
+    # Evalúa el modelo en el conjunto de test
     costos_test = evaluar_red(entorno, red_final, entorno.pool_test)
     logger.info("costo medio en test: %.2f", float(np.mean(costos_test)))

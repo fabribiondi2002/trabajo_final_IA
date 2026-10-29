@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 import torch
+import json 
 
 from src.agent import QNetwork
 from src.env import TerrainLevelingEnv
@@ -8,6 +9,7 @@ from src.train import (
     ConfigEntrenamiento, cargar_modelo, correr_agente, entrenar,
     epsilon_en, evaluar_red, guardar_modelo,
 )
+from src.train import cargar_historial, guardar_historial 
 
 
 @pytest.fixture(scope="module")
@@ -115,3 +117,48 @@ def test_entrenar_no_toca_los_terrenos_de_test(env, tmp_path):
     test_antes = [(e.seed, e.viajes) for e in env.pool_test]
     entrenar(env, cfg_chica(tmp_path))
     assert [(e.seed, e.viajes) for e in env.pool_test] == test_antes
+
+def historial_de_ejemplo():
+    return {
+        "recompensa": [-3.0, -2.5],
+        "costo": [30.0, 25.0],
+        "perdida": [float("nan"), 0.5],
+        "validacion": [(100, 390.0), (200, 388.5)],
+        "mejor_costo_validacion": [388.5],
+    }
+
+
+def test_historial_guardado_y_cargado_es_el_mismo(tmp_path):
+    ruta = str(tmp_path / "h.json")
+    guardar_historial(historial_de_ejemplo(), ruta, ConfigEntrenamiento(seed=7))
+    hist, config = cargar_historial(ruta)
+    assert hist["recompensa"] == [-3.0, -2.5] and hist["costo"] == [30.0, 25.0]
+    assert hist["validacion"] == [(100, 390.0), (200, 388.5)]
+    assert hist["mejor_costo_validacion"] == [388.5]
+    assert config["seed"] == 7
+
+
+def test_los_nan_se_guardan_como_null_y_se_recuperan_como_nan(tmp_path):
+    ruta = str(tmp_path / "h.json")
+    guardar_historial(historial_de_ejemplo(), ruta, ConfigEntrenamiento())
+    # el archivo tiene que ser JSON estándar (sin NaN suelto)
+    json.loads((tmp_path / "h.json").read_text(), parse_constant=lambda c: pytest.fail(f"JSON no estándar: {c}"))
+    hist, _ = cargar_historial(ruta)
+    assert np.isnan(hist["perdida"][0]) and hist["perdida"][1] == 0.5
+
+
+def test_guardar_historial_crea_la_carpeta(tmp_path):
+    ruta = tmp_path / "a" / "b" / "h.json"
+    guardar_historial(historial_de_ejemplo(), str(ruta), ConfigEntrenamiento())
+    assert ruta.exists()
+
+
+def test_el_historial_de_un_entrenamiento_real_se_puede_guardar_y_cargar(env, tmp_path):
+    _, hist = entrenar(env, cfg_chica(tmp_path))
+    ruta = str(tmp_path / "real.json")
+    guardar_historial(hist, ruta, cfg_chica(tmp_path))
+    cargado, _ = cargar_historial(ruta)
+    assert cargado["recompensa"] == hist["recompensa"]
+    assert cargado["validacion"] == hist["validacion"]
+    assert cargado["mejor_costo_validacion"] == hist["mejor_costo_validacion"]
+    assert np.allclose(cargado["perdida"], hist["perdida"], equal_nan=True)
