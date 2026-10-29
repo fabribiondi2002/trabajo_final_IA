@@ -3,6 +3,7 @@ import pytest
 from src.env import (
     RANGO_SEMILLAS_ENTRENAMIENTO,
     SEMILLAS_TEST,
+    SEMILLAS_VALIDACION,
     TerrainLevelingEnv,
 )
 
@@ -58,3 +59,16 @@ def test_distinto_master_seed_distinto_pool():
 def test_max_viajes_muy_chico_lanza_error():
     with pytest.raises(RuntimeError):
         TerrainLevelingEnv(tamano=8, capacidad_maquina=1, max_viajes=1, tamano_pool=3)
+
+def test_semillas_de_validacion_estan_en_su_rango(env):
+    assert len(env.pool_validacion) > 0
+    assert all(e.seed in SEMILLAS_VALIDACION for e in env.pool_validacion)
+
+
+def test_test_validacion_y_entrenamiento_no_se_solapan():
+    test, val, train = set(SEMILLAS_TEST), set(SEMILLAS_VALIDACION), set(RANGO_SEMILLAS_ENTRENAMIENTO)
+    assert test.isdisjoint(val) and test.isdisjoint(train) and val.isdisjoint(train)
+
+
+def test_ninguna_entrada_de_validacion_excede_max_viajes(env):
+    assert all(len(e.viajes) <= env.max_viajes for e in env.pool_validacion)

@@ -11,7 +11,8 @@ from src.trip_builder import Viaje, construir_viajes
 from src.utils import distancia_manhattan
 
 SEMILLAS_TEST = range(0, 100)
-RANGO_SEMILLAS_ENTRENAMIENTO = range(100, 1_000_000)
+SEMILLAS_VALIDACION = range(100, 150)
+RANGO_SEMILLAS_ENTRENAMIENTO = range(150, 1_000_000)
 MAX_INTENTOS_POR_TERRENO = 50
 
 class EstadoTierraFertil(Enum):
@@ -107,6 +108,7 @@ class TerrainLevelingEnv(gym.Env):
 
         ## Se contruye el pool de test y el de entrenamiento.
         self.pool_test = self._construir_entradas(list(SEMILLAS_TEST))
+        self.pool_validacion = self._construir_entradas(list(SEMILLAS_VALIDACION))
         self.pool_entrenamiento = self._construir_pool(tamano_pool)
 
         self.peso_distancia = peso_distancia
