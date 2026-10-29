@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ConfigEntrenamiento:
-    episodios: int = 3000
+    episodios: int = 1000
     gamma: float = 0.99
     lr: float = 1e-3
     batch: int = 64
