@@ -16,19 +16,19 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class ConfigEntrenamiento:
     episodios: int = 1000
-    gamma: float = 0.99
-    lr: float = 1e-3
+    gamma: float = 0.5
+    lr: float = 3e-4
     batch: int = 64
-    oculta: int = 128
+    oculta: int = 32
     capacidad_buffer: int = 50_000
     epsilon_inicial: float = 1.0
     epsilon_final: float = 0.05
-    episodios_decay: int = 1500        # episodios que tarda epsilon en llegar al mínimo
+    episodios_decay: int = 500         # episodios que tarda epsilon en llegar al mínimo (la mitad de los episodios)
     sincronizar_cada: int = 500        # pasos entre copias red -> red objetivo
-    empezar_a_aprender: int = 1000     # experiencias mínimas antes de aprender
-    evaluar_cada: int = 100            # episodios entre evaluaciones en validación
-    paciencia: int | None = None       # episodios sin mejora antes de detener el entrenamiento
-    arquitectura: str = "plana"  
+    empezar_a_aprender: int = 1000     # experiencias mínimas antes de aprender (~30 episodios)
+    evaluar_cada: int = 50             # episodios entre evaluaciones en validación
+    paciencia: int | None = None       # evaluaciones seguidas sin mejora antes de parar (None: no parar)
+    arquitectura: str = "por_viaje"    # "plana" o "por_viaje"
     seed: int = 0
     ruta_modelo: str | None = "models/dqn.pt"
 
@@ -62,7 +62,7 @@ def evaluar_red(env: TerrainLevelingEnv, red: QNetwork, entradas: list[EntradaPo
     return [correr_agente(env, red, e) for e in entradas]
 
 
-def guardar_modelo(red: QNetwork, ruta: str, cfg: ConfigEntrenamiento, costo_validacion: float) -> None:
+def guardar_modelo(red: QNetwork, ruta: str, cfg: ConfigEntrenamiento, costo_validacion: float, entorno: dict | None = None) -> None:    
     """Guarda pesos + lo necesario para reconstruir y trazar el modelo."""
     Path(ruta).parent.mkdir(parents=True, exist_ok=True)
     torch.save(
@@ -73,6 +73,7 @@ def guardar_modelo(red: QNetwork, ruta: str, cfg: ConfigEntrenamiento, costo_val
             "oculta": cfg.oculta,
             "config": asdict(cfg),
             "costo_validacion": costo_validacion,
+            "entorno": entorno,
         },
         ruta,
     )
@@ -86,7 +87,7 @@ def cargar_modelo(ruta: str) -> tuple[QNetwork, dict]:
     red.eval()
     return red, datos
 
-def guardar_historial(historial: dict[str, list], ruta: str, cfg: ConfigEntrenamiento) -> None:
+def guardar_historial(historial: dict[str, list], ruta: str, cfg: ConfigEntrenamiento, entorno: dict | None = None) -> None:
     """
     Guarda el historial de un entrenamiento (y su configuración) como JSON, para poder
     graficar la curva de aprendizaje sin reentrenar. Los NaN se guardan como null.
@@ -99,7 +100,7 @@ def guardar_historial(historial: dict[str, list], ruta: str, cfg: ConfigEntrenam
         return valor
 
     Path(ruta).parent.mkdir(parents=True, exist_ok=True)
-    contenido = {"config": asdict(cfg), "historial": {k: limpio(v) for k, v in historial.items()}}
+    contenido = {"config": asdict(cfg), "entorno": entorno, "historial": {k: limpio(v) for k, v in historial.items()}}    
     with open(ruta, "w", encoding="utf-8") as archivo:
         json.dump(contenido, archivo, indent=2)
 
@@ -180,7 +181,7 @@ def entrenar(
                 mejor_costo = costo_val
                 mejores_pesos = {k: v.clone() for k, v in red.state_dict().items()}
                 if cfg.ruta_modelo:
-                    guardar_modelo(red, cfg.ruta_modelo, cfg, costo_val)
+                    guardar_modelo(red, cfg.ruta_modelo, cfg, costo_val, env.parametros())
             else:
                 # Se incrementa el contador de evaluaciones sin mejora y se detiene si se supera la paciencia
                 evaluaciones_sin_mejora += 1
@@ -206,7 +207,7 @@ if __name__ == "__main__":
     cfg = ConfigEntrenamiento()
     # Entrena y guarda el modelo, guarda el entrenamiento en el historial
     red_final, hist = entrenar(entorno, cfg)
-    guardar_historial(hist, "models/historial.json", cfg)
+    guardar_historial(hist, "models/historial.json", cfg, entorno.parametros())
     # Evalúa el modelo en el conjunto de test
     costos_test = evaluar_red(entorno, red_final, entorno.pool_test)
     logger.info("costo medio en test: %.2f", float(np.mean(costos_test)))

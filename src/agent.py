@@ -28,20 +28,21 @@ class QNetwork(nn.Module):
 class QNetworkPorViaje(nn.Module):
     """
     Misma interfaz que QNetwork, pero la misma mini-red puntúa
-    cada viaje por separado usando solo sus 6 features y la posición de la máquina
-    así lo aprendido sobre un viaje vale para todas las ranuras, y no depende del orden.
+    cada viaje por separado usando solo sus features (6, u 8 con lookahead) y la posición de la máquina.
+    Así lo aprendido sobre un viaje vale para todas las ranuras, y no depende del orden.
     """
 
-    FEATURES_POR_VIAJE = 6
     GLOBALES = 2
 
     def __init__(self, obs_dim: int, n_acciones: int, oculta: int = 128):
         super().__init__()
-        if obs_dim != self.GLOBALES + self.FEATURES_POR_VIAJE * n_acciones:
-            raise ValueError("obs_dim no coincide con 2 + 6 * n_acciones.")
+        resto = obs_dim - self.GLOBALES
+        if resto <= 0 or resto % n_acciones != 0:
+            raise ValueError("obs_dim no coincide con 2 + features * n_acciones.")
         self.obs_dim, self.n_acciones, self.oculta = obs_dim, n_acciones, oculta
+        self.features_por_viaje = resto // n_acciones     # 6, o 8 si el entorno usa lookahead
         self.red = nn.Sequential(
-            nn.Linear(self.GLOBALES + self.FEATURES_POR_VIAJE, oculta),
+            nn.Linear(self.GLOBALES + self.features_por_viaje, oculta),
             nn.ReLU(),
             nn.Linear(oculta, oculta),
             nn.ReLU(),
@@ -50,10 +51,10 @@ class QNetworkPorViaje(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         lote = x.shape[0]
-        posicion = x[:, : self.GLOBALES]                                                        
-        viajes = x[:, self.GLOBALES :].reshape(lote, self.n_acciones, self.FEATURES_POR_VIAJE)  
-        posicion = posicion.unsqueeze(1).expand(-1, self.n_acciones, -1)                        
-        return self.red(torch.cat([posicion, viajes], dim=2)).squeeze(2)                       
+        posicion = x[:, : self.GLOBALES]  
+        viajes = x[:, self.GLOBALES :].reshape(lote, self.n_acciones, self.features_por_viaje)
+        posicion = posicion.unsqueeze(1).expand(-1, self.n_acciones, -1)
+        return self.red(torch.cat([posicion, viajes], dim=2)).squeeze(2)                     
 
 class ReplayBuffer:
     """

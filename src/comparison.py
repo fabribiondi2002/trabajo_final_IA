@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from src.baseline import evaluar_baseline
-from src.env import TerrainLevelingEnv
+from src.env import TerrainLevelingEnv, crear_entorno
 from src.evaluation import costos_referencia
 from src.train import cargar_historial, cargar_modelo, evaluar_red
 
@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 class Experimento:
     nombre: str
     historiales: list[dict]
-    costos_test: list[float]   
+    costos_test: list[float]
+    entorno: TerrainLevelingEnv | None = None   # entorno con el que se entrenó
 
 
 def parsear_variante(texto: str) -> tuple[str, str]:
@@ -75,18 +76,31 @@ def curva_validacion(historiales: list[dict]) -> tuple[np.ndarray, np.ndarray, n
     return np.asarray(episodios), media, desvio
 
 
-def cargar_experimento(nombre: str, carpeta: str, env: TerrainLevelingEnv) -> Experimento:
-    """Lee los historiales y mide en test cada modelo guardado de la carpeta."""
+def cargar_experimento(nombre: str, carpeta: str) -> Experimento:
+    """
+    Lee los historiales y mide en test cada modelo guardado de la carpeta.
+    El entorno se recrea con los parámetros guardados en el modelo (modelos viejos: los de por defecto).
+    """
     rutas_hist = archivos_por_seed(carpeta, "historial_seed_*.json")
     rutas_modelo = archivos_por_seed(carpeta, "modelo_seed_*.pt")
     if not rutas_hist or not rutas_modelo:
         raise FileNotFoundError(f"No hay historiales y modelos en '{carpeta}'.")
     historiales = [cargar_historial(str(r))[0] for r in rutas_hist]
+    env = None
     costos = []
     for ruta in rutas_modelo:
-        red, _ = cargar_modelo(str(ruta))
+        red, meta = cargar_modelo(str(ruta))
+        if env is None:
+            env = crear_entorno(meta.get("entorno"), tamano_pool=2)
         costos.append(float(np.mean(evaluar_red(env, red, env.pool_test))))
-    return Experimento(nombre, historiales, costos)
+    return Experimento(nombre, historiales, costos, env)
+
+
+def verificar_mismo_terreno(experimentos: list[Experimento]) -> None:
+    """Los costos solo se pueden comparar si todos se midieron sobre los mismos terrenos."""
+    claves = {(e.entorno.tamano, e.entorno.capacidad_maquina, e.entorno.max_viajes) for e in experimentos if e.entorno}
+    if len(claves) > 1:
+        raise ValueError(f"Los experimentos usan terrenos distintos (tamano, capacidad, max_viajes): {sorted(claves)}")
 
 
 def graficar(
@@ -166,8 +180,9 @@ if __name__ == "__main__":
     parser.add_argument("--sin-referencia", action="store_true", help="no calcular la referencia (más rápido)")
     args = parser.parse_args()
 
-    entorno = TerrainLevelingEnv()
-    experimentos = [cargar_experimento(n, c, entorno) for n, c in map(parsear_variante, args.variantes)]
+    experimentos = [cargar_experimento(n, c) for n, c in map(parsear_variante, args.variantes)]
+    verificar_mismo_terreno(experimentos)
+    entorno = experimentos[0].entorno
     greedy_val = float(np.mean(evaluar_baseline(entorno, entorno.pool_validacion)))
     greedy_test = float(np.mean(evaluar_baseline(entorno, entorno.pool_test)))
     referencia = None if args.sin_referencia else float(np.mean(costos_referencia(entorno.pool_test)))

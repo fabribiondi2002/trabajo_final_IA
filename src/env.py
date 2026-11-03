@@ -96,7 +96,8 @@ class TerrainLevelingEnv(gym.Env):
         master_seed: int = 0,
         peso_distancia: float = 1.0,
         bonus_final: float = 1.0,
-        recompensa: str = "total"
+        recompensa: str = "total",
+        lookahead: bool = False
     ):
         super().__init__()
         if recompensa not in RECOMPENSAS:
@@ -107,13 +108,16 @@ class TerrainLevelingEnv(gym.Env):
         self.capacidad_maquina = capacidad_maquina
         self.max_viajes = max_viajes
         self.master_seed = master_seed
+        self.tamano_pool = tamano_pool
         self.action_space = spaces.Discrete(max_viajes)
+        self.lookahead = lookahead
+        self.features_por_viaje = 8 if lookahead else 6
 
         ## Observación es un vector de floats:
         ## 2 floats: posición de la máquina (x, y)
         ## 6 floats por viaje: (origen_x, origen_y, destino_x, destino_y, volumen, distancia_manhattan)
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(2 + 6 * max_viajes,), dtype=np.float32
+            low=-np.inf, high=np.inf, shape=(2 + self.features_por_viaje * max_viajes,), dtype=np.float32
         )
 
         ## Se contruye el pool de test y el de entrenamiento.
@@ -124,6 +128,20 @@ class TerrainLevelingEnv(gym.Env):
         self.peso_distancia = peso_distancia
         self.bonus_final = bonus_final
 
+    def parametros(self) -> dict:
+        """Parámetros con los que se creó el entorno. Se guardan junto al modelo para poder recrearlo igual."""
+        return {
+            "tamano": self.tamano,
+            "capacidad_maquina": self.capacidad_maquina,
+            "max_viajes": self.max_viajes,
+            "tamano_pool": self.tamano_pool,
+            "master_seed": self.master_seed,
+            "peso_distancia": self.peso_distancia,
+            "bonus_final": self.bonus_final,
+            "recompensa": self.recompensa,
+            "lookahead": self.lookahead,
+        }
+    
     def _viajes_de_semilla(self, seed: int) -> tuple[Viaje, ...] | None:
         """
         Crear y devuelve los viajes del terreno de una semilla,
@@ -227,9 +245,11 @@ class TerrainLevelingEnv(gym.Env):
         Arma la observación del entorno como un vector de floats normalizados
         [pos_x, pos_y] + 6 valores por viaje:
         (origen_x, origen_y, destino_x, destino_y, volumen, dist. máquina->origen).
+        Con lookahead hay 2 valores más por viaje.
         """
         lado = max(self.tamano - 1, 1)
-        obs = np.zeros(2 + 6 * self.max_viajes, dtype=np.float32)
+        f = self.features_por_viaje
+        obs = np.zeros(2 + f * self.max_viajes, dtype=np.float32)
         ## normaliza la posicion de la máquina
         obs[0] = self.posicion[0] / lado
         obs[1] = self.posicion[1] / lado
@@ -237,14 +257,40 @@ class TerrainLevelingEnv(gym.Env):
         for i, viaje in enumerate(self.viajes):
             if self.completados[i]:
                 continue
-            base = 2 + 6 * i
+            base = 2 + f * i
             obs[base] = viaje.origen[0] / lado
             obs[base + 1] = viaje.origen[1] / lado
             obs[base + 2] = viaje.destino[0] / lado
             obs[base + 3] = viaje.destino[1] / lado
             obs[base + 4] = viaje.volumen / self.capacidad_maquina
             obs[base + 5] = distancia_manhattan(self.posicion, viaje.origen) / (2 * lado)
+        if self.lookahead:
+            self._agregar_lookahead(obs, lado)
         return obs
+
+    def _agregar_lookahead(self, obs: np.ndarray, lado: int) -> None:
+        """
+        Para cada viaje pendiente agrega 2 datos sobre lo que queda después de hacerlo
+        (los demás viajes pendientes, sin contar a ese):
+          - distancia desde su destino hasta el origen más cercano,
+          - distancia desde su destino hasta el centroide de esos orígenes.
+        Si es el único pendiente no hay "después" y ambos valen 0.
+        """
+        pendientes = [i for i, completado in enumerate(self.completados) if not completado]
+        m = len(pendientes)
+        if m < 2:
+            return
+        origenes = np.array([self.viajes[i].origen for i in pendientes], dtype=float)
+        destinos = np.array([self.viajes[i].destino for i in pendientes], dtype=float)
+        dist = np.abs(destinos[:, None, :] - origenes[None, :, :]).sum(axis=2)   # (m, m): destino i -> origen j
+        np.fill_diagonal(dist, np.inf)                                           # un viaje no cuenta como su propio "siguiente"
+        mas_cercano = dist.min(axis=1)
+        centroides = (origenes.sum(axis=0) - origenes) / (m - 1)                 # centroide de los orígenes de los otros
+        al_centroide = np.abs(destinos - centroides).sum(axis=1)
+        for k, i in enumerate(pendientes):
+            base = 2 + self.features_por_viaje * i
+            obs[base + 6] = mas_cercano[k] / (2 * lado)
+            obs[base + 7] = al_centroide[k] / (2 * lado)
 
     def step(self, action: int):
         """
@@ -285,3 +331,10 @@ class TerrainLevelingEnv(gym.Env):
         info["distancia_paso"] = distancia
         info["costo_acumulado"] = self.costo_acumulado
         return self._armar_observacion(), float(reward), terminated, False, info
+
+def crear_entorno(parametros: dict | None = None, **cambios) -> TerrainLevelingEnv:
+    """
+    Recrea un entorno a partir de los parámetros guardados con un modelo.
+    Sin parámetros (modelos viejos) usa los de por defecto. `cambios` pisa cualquiera de ellos.
+    """
+    return TerrainLevelingEnv(**{**(parametros or {}), **cambios})

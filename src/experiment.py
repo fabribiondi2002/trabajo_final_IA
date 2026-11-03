@@ -84,7 +84,7 @@ def correr_experimento(
         cfg = replace(cfg_base, seed=seed, ruta_modelo=str(Path(carpeta) / f"modelo_seed_{seed}.pt"))
         logger.info("Entrenando seed %d...", seed)
         red, historial = entrenar(env, cfg)
-        guardar_historial(historial, str(Path(carpeta) / f"historial_seed_{seed}.json"), cfg)
+        guardar_historial(historial, str(Path(carpeta) / f"historial_seed_{seed}.json"), cfg, env.parametros())
         resultado = resumir(evaluar_red(env, red, entradas), costos_greedy, costos_ref)
         resultados.append(ResultadoSeed(seed, historial["mejor_costo_validacion"][0], resultado))
         logger.info("seed %d: costo test %.2f, brecha cerrada %.1f%%", seed, resultado.costo_agente, 100 * resultado.brecha_cerrada)
@@ -119,9 +119,11 @@ if __name__ == "__main__":
     parser.add_argument("--peso-distancia", type=float, default=1.0, help="escala del reward (parámetro del entorno)")
     parser.add_argument("--recompensa", choices=RECOMPENSAS, default="total", help="qué tramos castiga el reward")
     parser.add_argument("--paciencia", type=int, default=None, help="parar si la validación no mejora en N evaluaciones seguidas")
+    parser.add_argument("--gamma", type=float, default=ConfigEntrenamiento().gamma, help="factor de descuento")
+    parser.add_argument("--lookahead", action="store_true", help="agrega a cada viaje 2 datos de lo que queda después de hacerlo")
     args = parser.parse_args()
 
-    entorno = TerrainLevelingEnv(peso_distancia=args.peso_distancia, recompensa=args.recompensa)
+    entorno = TerrainLevelingEnv(peso_distancia=args.peso_distancia, recompensa=args.recompensa, lookahead=args.lookahead)
     cfg = ConfigEntrenamiento(
         arquitectura=args.arquitectura,
         episodios=args.episodios,
@@ -130,6 +132,7 @@ if __name__ == "__main__":
         lr=args.lr,
         evaluar_cada=args.evaluar_cada,
         paciencia=args.paciencia,
+        gamma=args.gamma
     )
     resultados = correr_experimento(entorno, cfg, args.seeds, args.carpeta)
     print(formatear_experimento(resultados, resumir_experimento(resultados)))

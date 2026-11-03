@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from src.baseline import evaluar_baseline
-from src.env import EntradaPool, TerrainLevelingEnv
+from src.env import EntradaPool, TerrainLevelingEnv, crear_entorno
 from src.reference import brecha_cerrada, mejor_orden_conocido
 from src.train import cargar_modelo, evaluar_red
 
@@ -94,6 +94,7 @@ if __name__ == "__main__":
     parser.add_argument("--reinicios", type=int, default=8)
     args = parser.parse_args()
 
-    entorno = TerrainLevelingEnv()
+    _, meta = cargar_modelo(args.modelo)
+    entorno = crear_entorno(meta.get("entorno"), tamano_pool=2)
     logger.info("Evaluando %s sobre %d terrenos de test...", args.modelo, len(entorno.pool_test))
     print(formatear(evaluar_modelo(args.modelo, entorno, entorno.pool_test, args.reinicios)))
