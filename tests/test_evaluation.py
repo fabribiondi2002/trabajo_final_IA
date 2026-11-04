@@ -80,7 +80,7 @@ def test_comparar_es_reproducible(env, red):
 # ---------- cargar un modelo guardado
 def test_evaluar_modelo_da_lo_mismo_que_comparar_con_la_red_en_memoria(env, red, tmp_path):
     ruta = str(tmp_path / "m.pt")
-    guardar_modelo(red, ruta, ConfigEntrenamiento(oculta=16), costo_validacion=1.0)
+    guardar_modelo(red, ruta, ConfigEntrenamiento(oculta=16, arquitectura="plana"), costo_validacion=1.0)
     entradas = env.pool_validacion[:3]
     assert evaluar_modelo(ruta, env, entradas, reinicios=2) == comparar(env, red, entradas, reinicios=2)
 
@@ -88,7 +88,7 @@ def test_evaluar_modelo_da_lo_mismo_que_comparar_con_la_red_en_memoria(env, red,
 def test_evaluar_modelo_rechaza_un_modelo_de_otro_entorno(env, tmp_path):
     otra = QNetwork(10, 3, 8)
     ruta = str(tmp_path / "otro.pt")
-    guardar_modelo(otra, ruta, ConfigEntrenamiento(oculta=8), costo_validacion=1.0)
+    guardar_modelo(otra, ruta, ConfigEntrenamiento(oculta=8, arquitectura="plana"), costo_validacion=1.0)
     with pytest.raises(ValueError):
         evaluar_modelo(ruta, env, env.pool_validacion[:2], reinicios=1)
 

@@ -130,17 +130,30 @@ def seleccionar_accion(
     return int(q.argmax().item())
 
 def calcular_objetivo(
-    red_objetivo: QNetwork, lote: dict[str, torch.Tensor], gamma: float
+    red_objetivo: QNetwork,
+    lote: dict[str, torch.Tensor],
+    gamma: float,
+    red: QNetwork | None = None,
 ) -> torch.Tensor:
     """
     Calcula el objetivo para un lote de experiencias.
-    objetivo = reward + gamma * max(Q(siguiente_obs, a)) sobre acciones válidas.
+    objetivo = reward + gamma * (valor del estado siguiente, sobre acciones válidas).
     Si terminó, el objetivo es solo el reward.
+
+    Sin `red` (DQN clásico) el valor es max Q_objetivo(siguiente, a): la red objetivo elige
+    la acción y también la evalúa, lo que tiende a sobreestimar.
+    Con `red` (Double DQN) la red que se entrena elige la mejor acción válida y la red
+    objetivo la evalúa: Q_objetivo(siguiente, argmax_a Q(siguiente, a)).
     """
     with torch.no_grad():
-        q_siguiente = red_objetivo(lote["obs_siguiente"])
-        q_siguiente = q_siguiente.masked_fill(~lote["mascaras_siguiente"], float("-inf"))
-        max_q = q_siguiente.max(dim=1).values
+        q_objetivo = red_objetivo(lote["obs_siguiente"])
+        q_objetivo = q_objetivo.masked_fill(~lote["mascaras_siguiente"], float("-inf"))
+        if red is None:
+            max_q = q_objetivo.max(dim=1).values
+        else:
+            q_actual = red(lote["obs_siguiente"]).masked_fill(~lote["mascaras_siguiente"], float("-inf"))
+            mejor = q_actual.argmax(dim=1, keepdim=True)
+            max_q = q_objetivo.gather(1, mejor).squeeze(1)
         max_q = torch.where(lote["terminados"] > 0, torch.zeros_like(max_q), max_q)
         return lote["rewards"] + gamma * max_q
 
@@ -151,6 +164,7 @@ def paso_de_aprendizaje(
     optimizador: torch.optim.Optimizer,
     lote: dict[str, torch.Tensor],
     gamma: float,
+    doble: bool = False
 ) -> float:
     """
     Hace un paso de aprendizaje sobre un lote de experiencias.
@@ -162,7 +176,7 @@ def paso_de_aprendizaje(
     Devuelve la pérdida como float.
     """
     q_predicho = red(lote["obs"]).gather(1, lote["acciones"].unsqueeze(1)).squeeze(1)
-    objetivo = calcular_objetivo(red_objetivo, lote, gamma)
+    objetivo = calcular_objetivo(red_objetivo, lote, gamma, red if doble else None)
     perdida = F.smooth_l1_loss(q_predicho, objetivo)
     optimizador.zero_grad()
     perdida.backward()

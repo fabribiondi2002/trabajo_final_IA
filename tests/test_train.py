@@ -60,7 +60,7 @@ def test_evaluar_red_devuelve_un_costo_por_terreno_y_es_deterministica(env):
 
 def test_guardar_y_cargar_da_la_misma_red(env, tmp_path):
     torch.manual_seed(0)
-    cfg = cfg_chica(tmp_path)
+    cfg = cfg_chica(tmp_path, arquitectura="plana")
     red = QNetwork(env.observation_space.shape[0], env.action_space.n, cfg.oculta)
     guardar_modelo(red, cfg.ruta_modelo, cfg, costo_validacion=123.0)
     cargada, meta = cargar_modelo(cfg.ruta_modelo)
@@ -270,3 +270,21 @@ def test_el_historial_con_parada_anticipada_se_guarda_y_se_carga(env, monkeypatc
     guardar_historial(hist, str(tmp_path / "h.json"), cfg)
     cargado, config = cargar_historial(str(tmp_path / "h.json"))
     assert cargado["episodios_entrenados"] == [6] and config["paciencia"] == 2
+
+# ---------- Double DQN
+def test_entrenar_con_double_dqn_corre_y_guarda_la_opcion(env, tmp_path):
+    cfg = cfg_chica(tmp_path, doble=True)
+    red, historial = entrenar(env, cfg)
+    assert len(historial["validacion"]) >= 1
+    _, meta = cargar_modelo(cfg.ruta_modelo)
+    assert meta["config"]["doble"] is True
+
+
+@pytest.mark.parametrize("doble", [False, True])
+def test_entrenar_le_pasa_la_opcion_doble_al_paso_de_aprendizaje(env, tmp_path, monkeypatch, doble):
+    import src.train as train
+    recibidos = []
+    original = train.paso_de_aprendizaje
+    monkeypatch.setattr(train, "paso_de_aprendizaje", lambda *a, **k: (recibidos.append(a[5] if len(a) > 5 else k.get("doble")), original(*a, **k))[1])
+    train.entrenar(env, cfg_chica(tmp_path, doble=doble))
+    assert recibidos and set(recibidos) == {doble}

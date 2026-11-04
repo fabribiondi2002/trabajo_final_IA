@@ -29,6 +29,7 @@ class ConfigEntrenamiento:
     evaluar_cada: int = 50             # episodios entre evaluaciones en validación
     paciencia: int | None = None       # evaluaciones seguidas sin mejora antes de parar (None: no parar)
     arquitectura: str = "por_viaje"    # "plana" o "por_viaje"
+    doble: bool = False
     seed: int = 0
     ruta_modelo: str | None = "models/dqn.pt"
 
@@ -157,7 +158,7 @@ def entrenar(
 
             if len(buffer) >= max(cfg.batch, cfg.empezar_a_aprender):
                 perdidas.append(
-                    paso_de_aprendizaje(red, red_objetivo, optimizador, buffer.muestrear(cfg.batch), cfg.gamma)
+                    paso_de_aprendizaje(red, red_objetivo, optimizador, buffer.muestrear(cfg.batch), cfg.gamma, cfg.doble)
                 )
             if pasos % cfg.sincronizar_cada == 0:
                 red_objetivo.load_state_dict(red.state_dict())

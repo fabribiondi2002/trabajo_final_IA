@@ -234,6 +234,69 @@ def test_la_perdida_baja_al_repetir_el_mismo_lote():
         ultima = paso_de_aprendizaje(red, objetivo, opt, lote, 0.99)
     assert ultima < primera * 0.1
 
+# ---------- Double DQN
+def test_doble_dqn_la_red_elige_y_la_objetivo_evalua():
+    # La red elige la acción 0 (Q=10); la objetivo la valora en 2.0. El DQN clásico tomaría el máximo de la objetivo (7.0).
+    red = RedFija([10.0, 1.0, 1.0])
+    objetivo = RedFija([2.0, 7.0, 3.0])
+    lote = lote_a_mano([1.0], [0.0], [[True, True, True]])
+    assert calcular_objetivo(objetivo, lote, 0.5).item() == pytest.approx(1.0 + 0.5 * 7.0)
+    assert calcular_objetivo(objetivo, lote, 0.5, red).item() == pytest.approx(1.0 + 0.5 * 2.0)
+
+
+def test_doble_dqn_respeta_la_mascara_al_elegir():
+    # La mejor de la red (Q=10) es inválida: elige entre las válidas la de Q=4 (acción 2); la objetivo la valora en 3.0.
+    red = RedFija([10.0, 1.0, 4.0])
+    objetivo = RedFija([2.0, 7.0, 3.0])
+    lote = lote_a_mano([0.0], [0.0], [[False, True, True]])
+    assert calcular_objetivo(objetivo, lote, 1.0, red).item() == pytest.approx(3.0)
+
+
+def test_doble_dqn_estado_terminal_es_solo_el_reward():
+    red, objetivo = RedFija([1.0, 2.0, 3.0]), RedFija([4.0, 5.0, 6.0])
+    lote = lote_a_mano([2.0], [1.0], [[False, False, False]])
+    resultado = calcular_objetivo(objetivo, lote, 0.99, red)
+    assert not torch.isnan(resultado).any()
+    assert resultado.item() == pytest.approx(2.0)
+
+
+def test_doble_dqn_con_redes_iguales_da_lo_mismo_que_el_clasico():
+    torch.manual_seed(0)
+    red = QNetwork(4, 3)
+    lote = lote_a_mano([1.0, -1.0], [0.0, 0.0], [[True, True, False], [True, True, True]])
+    lote["obs_siguiente"] = torch.rand(2, 4)
+    assert torch.allclose(calcular_objetivo(red, lote, 0.9), calcular_objetivo(red, lote, 0.9, red))
+
+
+def test_paso_de_aprendizaje_doble_mueve_los_pesos_y_no_toca_la_objetivo():
+    torch.manual_seed(0)
+    red, objetivo = QNetwork(4, 3), QNetwork(4, 3)
+    opt = torch.optim.Adam(red.parameters(), lr=1e-2)
+    lote = lote_a_mano([1.0, -1.0], [0.0, 0.0], [[True, True, True]] * 2)
+    lote["obs"], lote["obs_siguiente"] = torch.rand(2, 4), torch.rand(2, 4)
+    red_antes = [p.clone() for p in red.parameters()]
+    obj_antes = [p.clone() for p in objetivo.parameters()]
+    perdida = paso_de_aprendizaje(red, objetivo, opt, lote, 0.9, doble=True)
+    assert isinstance(perdida, float)
+    assert any(not torch.equal(a, p) for a, p in zip(red_antes, red.parameters()))
+    assert all(torch.equal(a, p) for a, p in zip(obj_antes, objetivo.parameters()))
+
+
+def test_paso_de_aprendizaje_doble_usa_otro_objetivo_que_el_clasico():
+    torch.manual_seed(1)
+    red, objetivo = QNetwork(4, 3), QNetwork(4, 3)
+    lote = lote_a_mano([0.0] * 16, [0.0] * 16, [[True, True, True]] * 16)
+    lote["obs"], lote["obs_siguiente"] = torch.rand(16, 4), torch.rand(16, 4)
+    clasico = calcular_objetivo(objetivo, lote, 0.9)
+    doble = calcular_objetivo(objetivo, lote, 0.9, red)
+    assert not torch.allclose(clasico, doble)
+    perdidas = []
+    for usar_doble in (False, True):
+        r = QNetwork(4, 3)
+        r.load_state_dict(red.state_dict())
+        opt = torch.optim.Adam(r.parameters(), lr=1e-2)
+        perdidas.append(paso_de_aprendizaje(r, objetivo, opt, lote, 0.9, doble=usar_doble))
+    assert perdidas[0] != perdidas[1]
 # ---------- QNetworkPorViaje
 
 def test_red_por_viaje_devuelve_un_q_por_viaje():

@@ -121,6 +121,7 @@ if __name__ == "__main__":
     parser.add_argument("--paciencia", type=int, default=None, help="parar si la validación no mejora en N evaluaciones seguidas")
     parser.add_argument("--gamma", type=float, default=ConfigEntrenamiento().gamma, help="factor de descuento")
     parser.add_argument("--lookahead", action="store_true", help="agrega a cada viaje 2 datos de lo que queda después de hacerlo")
+    parser.add_argument("--doble", action="store_true", help="usa Double DQN")
     args = parser.parse_args()
 
     entorno = TerrainLevelingEnv(peso_distancia=args.peso_distancia, recompensa=args.recompensa, lookahead=args.lookahead)
@@ -132,7 +133,8 @@ if __name__ == "__main__":
         lr=args.lr,
         evaluar_cada=args.evaluar_cada,
         paciencia=args.paciencia,
-        gamma=args.gamma
+        gamma=args.gamma,
+        doble=args.doble,
     )
     resultados = correr_experimento(entorno, cfg, args.seeds, args.carpeta)
     print(formatear_experimento(resultados, resumir_experimento(resultados)))
