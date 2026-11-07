@@ -7,7 +7,7 @@ sum(alturas) == sum(objetivo) exactamente en enteros.
 """
 
 import numpy as np
-from noise import pnoise2
+from src.ruido import pnoise2
 
 
 def _generar_heightmap(tamano, offset_x, offset_y, escala, amplitud, nivel_base):
