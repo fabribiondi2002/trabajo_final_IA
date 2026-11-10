@@ -1,0 +1,4 @@
+# Dependencias solo para notebooks/demo.ipynb (la API y el entrenamiento no las necesitan).
+# Instalación: pip install -r requirements-notebook.txt   (además de requirements.txt)
+ipykernel==7.4.0
+ipywidgets==8.1.9
