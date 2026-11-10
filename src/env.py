@@ -160,6 +160,10 @@ class TerrainLevelingEnv(gym.Env):
         if len(viajes) > self.max_viajes:
             return None
         return tuple(viajes)
+    
+    def entrada_de_semilla(self, seed: int) -> EntradaPool | None:
+        viajes = self._viajes_de_semilla(seed)
+        return None if viajes is None else EntradaPool(seed=seed, viajes=viajes)
 
     def _construir_entradas(self, semillas: list[int]) -> list[EntradaPool]:
         """
