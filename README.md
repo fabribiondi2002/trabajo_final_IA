@@ -21,11 +21,33 @@ Inteligencia Artificial (IUA).
 
 ## Demo
 
-<!-- COMPLETAR cuando esté el notebook: notebooks/demo.ipynb -->
-El notebook `notebooks/demo.ipynb` carga un modelo entrenado y muestra un terreno resuelto, comparando el orden
-de viajes del greedy con el del agente. *(Pendiente de agregar.)*
+`notebooks/demo.ipynb` es una demo interactiva que usa la API. Permite elegir una seed, ver el terreno que genera
+y enviarlo a resolver para comparar al agente DQN contra el greedy.
 
-El gráfico `graficos/comparacion.png` muestra las curvas de validación y el costo en test de las variantes
+1. Levantar la API (ver [API y Docker](#api-y-docker)).
+2. Instalar lo que necesita el notebook (además de `requirements.txt`):
+
+   ```bash
+   pip install -r requirements-notebook.txt
+   ```
+
+3. Abrir `notebooks/demo.ipynb` (Jupyter o VS Code) y ejecutar las celdas en orden.
+
+Qué se puede hacer en el notebook:
+
+- **Elegir una seed y ver el terreno** en 2D (mapa de calor de alturas actuales, objetivo y diferencia) o en 3D
+  (relieve actual y objetivo lado a lado, con sliders de elevación y giro).
+- **Enviarlo a resolver** y ver el costo del greedy, el del agente y cuánto mejora o empeora el agente.
+- **Comparación:** costo total separado en tramo con carga (igual en ambos, porque los viajes son los mismos)
+  y traslado en vacío (lo único que cambia con el orden), más la curva de costo acumulado.
+- **Animación paso a paso:** la máquina, el viaje actual en naranja, los anteriores en gris y el terreno
+  poniéndose en cero, con la curva de costo acumulado.
+- **Tabla de viajes** con origen, destino, volumen y distancia de cada paso.
+- **Varias seeds:** tabla y gráfico de las seeds 0 a 9.
+
+Si la API no está en `localhost:8000`, definir la variable de entorno `API_URL` antes de abrir el notebook.
+
+Además, `graficos/comparacion.png` muestra las curvas de validación y el costo en test de las variantes
 entrenadas.
 
 ## Autores y contexto académico
@@ -71,15 +93,16 @@ nunca vio.
 | **Performance** | Minimizar la distancia total recorrida por la máquina para completar todos los viajes. El volumen total de tierra a mover lo fija el problema de transporte y es el mismo para cualquier orden, por lo que lo único que el agente puede optimizar es la distancia. Se mide con el costo en test y la brecha cerrada respecto del greedy y la referencia. |
 | **Environment** | Grilla de N×N celdas (8×8 por defecto) con altura actual y objetivo, y lista de viajes pendientes (cada flujo origen-destino-volumen partido en cargas de tamaño `capacidad_maquina`). Se modela la capa fértil de cada celda (in situ / extraída / repuesta) y la posición de la máquina. Es totalmente observable, determinístico dado el terreno, secuencial, estático, discreto y con un único agente. |
 | **Actuators** | Elegir el próximo viaje pendiente (acción discreta, hasta 50 viajes). El desplazamiento de la máquina y la extracción y reposición de la capa fértil se calculan automáticamente por el entorno. |
-| **Sensors** | Lo que ve el agente es un vector: La posición de la máquina y, por cada viaje, su origen (x, y), su destino (x, y), su volumen y la distancia de la máquina al origen. Con la opción `--lookahead` se agregan 2 datos por viaje: la distancia de su destino al origen más cercano entre los otros viajes pendientes y al centroide de esos orígenes. Los viajes ya completados se enmascaran. |
+| **Sensors** | Lo que ve el agente es un vector: la posición de la máquina y, por cada viaje, su origen (x, y), su destino (x, y), su volumen y la distancia de la máquina al origen. Con la opción `--lookahead` se agregan 2 datos por viaje: la distancia de su destino al origen más cercano entre los otros viajes pendientes y al centroide de esos orígenes. Los viajes ya completados se enmascaran. |
 
 ## Requisitos e instalación
 
 - Python 3.10 o superior (se usa la sintaxis `int | None`). Probado con Python 3.12.
-- Dependencias principales: `torch`, `numpy`, `gymnasium`, `networkx`, `noise`, `matplotlib` y `pytest`
-  (ver `requirements.txt`).
-- El paquete `noise` compila una extensión en C: en Linux y macOS puede hacer falta un compilador
-  (`build-essential` / Xcode Command Line Tools), y en Windows las Build Tools de Visual Studio.
+- Dependencias principales: `torch`, `numpy`, `scipy`, `gymnasium`, `networkx`, `matplotlib`, `pytest`, y para la API
+  `fastapi`, `uvicorn` y `pydantic` (ver `requirements.txt`, con versiones fijadas).
+- El ruido Perlin que genera los terrenos está implementado en `src/ruido.py`, sin dependencias externas ni
+  compilación de código C. Da los mismos terrenos que el paquete `noise`.
+- Solo para la demo: `requirements-notebook.txt` (ver [Demo](#demo)).
 
 ```bash
 git clone https://github.com/fabribiondi2002/trabajo_final_IA.git
@@ -97,10 +120,9 @@ Para verificar que todo quedó bien:
 python -m pytest tests -q
 ```
 
-### Variables de entorno
-
-El proyecto no requiere variables de entorno. Toda la configuración se pasa por argumentos de línea de comandos
-(ver abajo) o por la clase `ConfigEntrenamiento` en `src/train.py`.
+La configuración de entrenamiento se pasa por argumentos de línea de comandos (ver abajo) o por la clase
+`ConfigEntrenamiento` en `src/train.py`. Las variables de entorno de la API y la demo están en
+[Variables de entorno](#variables-de-entorno).
 
 ## Cómo ejecutarlo
 
@@ -123,7 +145,7 @@ en test comparado con el greedy y la referencia.
 | `--episodios` | episodios de entrenamiento | `1000` |
 | `--oculta` | neuronas de las capas ocultas | `32` |
 | `--lr` | learning rate | `3e-4` |
-| `--gamma` | factor de descuento | `0.5` |
+| `--gamma` | factor de descuento | `0.39` |
 | `--evaluar-cada` | episodios entre evaluaciones en validación | `50` |
 | `--peso-distancia` | escala del reward (parámetro del entorno) | `1.0` |
 | `--recompensa` | `total` o `vacio` (solo castiga el tramo en vacío) | `total` |
@@ -215,9 +237,9 @@ Notas sobre la tabla:
 
 El Charter fijó como meta una reducción de costo de al menos 20% respecto del greedy, con la aclaración de que el
 valor se ajustaría tras las primeras corridas exploratorias. Esas corridas mostraron que la meta no era alcanzable:
-La mejor solución conocida (la referencia) reduce el costo apenas un **2.05%** respecto del greedy, de modo que ni
+la mejor solución conocida (la referencia) reduce el costo apenas un **2.05%** respecto del greedy, de modo que ni
 siquiera el óptimo conocido llega al 20%. El agente reduce el costo un **0.60%** (355.44 → 353.31). Por eso la
-meta se redefinió en términos de la brecha cerrada, que mide qué parte de lo mejorable se logra: El gente cierra
+meta se redefinió en términos de la brecha cerrada, que mide qué parte de lo mejorable se logra: el agente cierra
 el **29.2%** de la distancia entre el greedy y la referencia.
 
 ## Análisis: el costo de validación empeora al entrenar
@@ -226,7 +248,7 @@ el **29.2%** de la distancia entre el greedy y la referencia.
 entrenamiento, y el mejor modelo aparece alrededor del episodio 100. Por ejemplo, para la red por viaje con reward
 en vacío (seed 0) la validación pasa de 362.9 en el episodio 100 a 372.6 en el 1000, mientras que el greedy
 obtiene 362.86 en el mismo conjunto. Esto explica por qué la parada anticipada da exactamente el mismo resultado
-que el entrenamiento completo: El modelo guardado ya es el del episodio ~100, y cortar solo ahorra tiempo
+que el entrenamiento completo: el modelo guardado ya es el del episodio ~100, y cortar solo ahorra tiempo
 (por ejemplo, de 12.4 a 5.1 minutos en la variante con lookahead).
 
 **Qué se probó.**
@@ -249,16 +271,22 @@ no se probó de forma aislada qué parte del efecto se debe al horizonte y cuál
 
 ## Limitaciones
 
+**Limitaciones**
+
 - **El agente supera al greedy del proyecto, pero el margen es chico.** La referencia reduce el costo solo ~2%
   respecto del greedy, y el agente cierra algo menos de un tercio de ese margen.
+- **Instancias chicas y sintéticas:** terrenos de 8×8 con hasta 50 viajes.
 - **Reproducibilidad entre computadoras:** los resultados pueden variar levemente entre máquinas por diferencias
   numéricas (por ejemplo, la fila 1 dio 386.31 en una computadora y 386.74 en otra), sin cambiar las conclusiones.
 
 ## Estructura del repositorio
 
 ```
+api/
+  main.py                API REST (FastAPI)
 src/
   terrain_generator.py   generación de terrenos
+  ruido.py               ruido Perlin (reemplaza al paquete noise)
   allocation.py          problema de transporte (qué zona alta rellena a cuál baja)
   trip_builder.py        construcción de los viajes
   env.py                 entorno Gymnasium
@@ -267,16 +295,81 @@ src/
   baseline.py            heurística greedy
   reference.py           referencia por búsqueda local
   evaluation.py          evaluación contra greedy y referencia
+  inferencia.py          resolver un terreno con un modelo entrenado (lo usa la API)
   experiment.py          entrenamiento con varias seeds
   comparison.py          gráfico comparativo de variantes
 tests/                   tests con pytest
-models/                  modelos e historiales guardados (no se versionan)
+notebooks/demo.ipynb     demo interactiva (usa la API)
+modelo/modelo_final.pt   modelo que carga la API (y la imagen de Docker)
+models/                  modelos e historiales de los experimentos (no se versionan)
 graficos/                gráficos generados
+Dockerfile               imagen de la API
+requirements.txt         dependencias (versiones fijadas)
+requirements-notebook.txt  dependencias extra de la demo
 ```
 
 ## API y Docker
 
-Pendiente. Se documentará acá cuando esté implementada.
+La API (FastAPI) carga un modelo entrenado al arrancar y expone el agente por HTTP. El código está en `api/main.py`
+y la lógica de inferencia en `src/inferencia.py`.
+
+### Endpoints
+
+| Método y ruta | Qué hace |
+|---|---|
+| `GET /health` | Indica si la API está viva. |
+| `GET /modelo` | Datos del modelo cargado: ruta, configuración de entrenamiento, entorno y costo de validación. |
+| `GET /terreno/{seed}` | Terreno de la seed (`alturas` y `objetivo`), cantidad de viajes y si el modelo puede resolverlo. No lo resuelve. |
+| `POST /resolver` | Recibe `{"seed": 7}` y devuelve el terreno, el orden de viajes del agente y del greedy con sus costos, y la mejora del agente sobre el greedy. |
+
+La seed va de 0 a 999999. Una seed inválida devuelve 422, y también un terreno que necesita más viajes
+que el máximo del modelo (`GET /terreno/{seed}` lo avisa antes con `resoluble: false`).
+FastAPI genera además una página interactiva en `http://localhost:8000/docs`.
+
+### Con Docker
+
+El modelo que usa la imagen está en `modelo/modelo_final.pt`.
+
+```bash
+docker build -t nivelacion-api .
+docker run -p 8000:8000 nivelacion-api
+```
+
+Probar:
+
+```bash
+curl localhost:8000/health
+curl localhost:8000/terreno/7
+curl -X POST localhost:8000/resolver -H "Content-Type: application/json" -d '{"seed": 7}'
+```
+
+Para usar otro modelo sin reconstruir la imagen, montar la carpeta y apuntar `MODELO_PATH` a él:
+
+```bash
+docker run -p 8000:8000 -v "$(pwd)/models/mi_experimento:/app/otro" \
+  -e MODELO_PATH=/app/otro/modelo_seed_0.pt nivelacion-api
+```
+
+### Sin Docker
+
+```bash
+uvicorn api.main:app --port 8000
+```
+
+### Logs
+
+Cada pedido deja una línea JSON en la salida estándar (`modelo_cargado`, `terreno_resuelto` con costos y
+milisegundos, `terreno_no_resoluble`).
+
+### Variables de entorno
+
+| Variable | Qué hace | Por defecto |
+|---|---|---|
+| `MODELO_PATH` | Ruta del modelo entrenado que carga la API al arrancar. Si el archivo no existe, la API no arranca. | `modelo/modelo_final.pt` (`/app/modelo/modelo_final.pt` en Docker) |
+| `API_URL` | Dirección de la API que usa `notebooks/demo.ipynb`. | `http://localhost:8000` |
+
+El entrenamiento y los experimentos no usan variables de entorno: se configuran por argumentos de línea de comandos
+o por `ConfigEntrenamiento` en `src/train.py`.
 
 ## Licencia
 
