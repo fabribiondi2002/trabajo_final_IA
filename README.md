@@ -14,7 +14,7 @@ Inteligencia Artificial (IUA).
 6. [Cómo ejecutarlo](#cómo-ejecutarlo)
 7. [Resultados](#resultados)
 8. [Análisis: el costo de validación empeora al entrenar](#análisis-el-costo-de-validación-empeora-al-entrenar)
-9. [Limitaciones y trabajo futuro](#limitaciones-y-trabajo-futuro)
+9. [Limitaciones](#limitaciones)
 10. [Estructura del repositorio](#estructura-del-repositorio)
 11. [API y Docker](#api-y-docker)
 12. [Licencia](#licencia)
@@ -145,7 +145,7 @@ en test comparado con el greedy y la referencia.
 | `--episodios` | episodios de entrenamiento | `1000` |
 | `--oculta` | neuronas de las capas ocultas | `32` |
 | `--lr` | learning rate | `3e-4` |
-| `--gamma` | factor de descuento | `0.39` |
+| `--gamma` | factor de descuento | `0.5` |
 | `--evaluar-cada` | episodios entre evaluaciones en validación | `50` |
 | `--peso-distancia` | escala del reward (parámetro del entorno) | `1.0` |
 | `--recompensa` | `total` o `vacio` (solo castiga el tramo en vacío) | `total` |
@@ -199,9 +199,14 @@ python -m src.evaluation --modelo models/lookahead_g039_paciencia/modelo_seed_0.
 ### Comparar variantes en un gráfico
 
 ```bash
-python -m src.comparison "por viaje=models/base_por_viaje" "vacío=models/base_vacio" \
-  "lookahead γ=0.99=models/lookahead" "lookahead γ=0.5=models/lookahead_g05" \
-  "lookahead γ=0.39=models/lookahead_g039_paciencia" --salida graficos/comparacion.png
+python -m src.comparison \
+  "base=models/base" \
+  "por viaje=models/base_por_viaje" \
+  "vacío=models/base_vacio" \
+  "lookahead γ 0.99=models/lookahead" \
+  "lookahead γ 0.5=models/lookahead_g05" \
+  "lookahead γ 0.39=models/lookahead_g039_paciencia" \
+  --salida graficos/comparacion.png
 ```
 
 Con `--sin-referencia` se omite el cálculo de la referencia y es más rápido.
