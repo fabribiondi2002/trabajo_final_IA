@@ -4,16 +4,275 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nivelación de terreno con DQN</title>
-  <style>
-    body { background:#123527; color:#F4F8DC; font-family:system-ui,sans-serif; max-width:900px; margin:0 auto; padding:2rem; }
-    h1 { font-size:2.4rem; } img { max-width:100%; background:#fff; border-radius:8px; }
-    a { color:#F4F8DC; }
-  </style>
+  <meta name="description" content="Agente de aprendizaje por refuerzo (DQN) que ordena los viajes de excavación y relleno para nivelar un terreno agrícola minimizando la distancia recorrida.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600..800&family=Inter:wght@400..600&display=swap">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<nav>
+  <a class="brand" href="#inicio">Nivelación con DQN</a>
+  <a href="#contexto">Contexto</a>
+  <a href="#arquitectura">Arquitectura</a>
+  <a href="#agente">Agente</a>
+  <a href="#experimentos">Experimentos</a>
+  <a href="#demo">Demo</a>
+  <a href="#reproducir">Reproducir</a>
+  <a href="https://github.com/fabribiondi2002/trabajo_final_IA">GitHub</a>
+</nav>
+
+<header class="hero" id="inicio">
+  <p class="eyebrow">Inteligencia Artificial · IUA Córdoba · 2026</p>
   <h1>Nivelación de terreno con DQN</h1>
-  <p>Un agente de aprendizaje por refuerzo que ordena los viajes de excavación y relleno para minimizar la distancia recorrida.</p>
-  <img src="assets/comparacion.png" alt="Comparación de variantes">
-  <p><a href="https://github.com/fabribiondi2002/trabajo_final_IA">Código en GitHub</a></p>
+  <p class="lead">Un agente de aprendizaje por refuerzo que decide en qué orden hacer los viajes de excavación y relleno para nivelar un terreno agrícola, minimizando la distancia total que recorre la máquina.</p>
+  <div class="stats">
+    <div class="stat hot"><b>353.31</b><span>costo medio del agente en test<br>(greedy: 355.44 · referencia: 348.15)</span></div>
+    <div class="stat"><b>29.2%</b><span>de la brecha entre el greedy y la referencia cerrada (± 1.7%)</span></div>
+    <div class="stat"><b>100</b><span>terrenos de test, 5 entrenamientos independientes por variante</span></div>
+  </div>
+  <div class="btns">
+    <a class="btn primary" href="#demo">Probar la demo</a>
+    <a class="btn" href="https://github.com/fabribiondi2002/trabajo_final_IA">Ver el código</a>
+  </div>
+</header>
+
+<main>
+
+<section id="contexto">
+  <h2>Contexto y problema</h2>
+  <p>El agro es central para la economía argentina. Según el INDEC, en 2025 los productos primarios (25,4%) y las manufacturas de origen agropecuario (35,0%) sumaron cerca del 60% de las exportaciones de bienes. Según la Bolsa de Comercio de Rosario, las cadenas agroindustriales explican alrededor del 18% del valor agregado bruto nacional (dato de 2024).</p>
+  <p>Nivelar el terreno importa porque permite repartir el agua de riego de forma pareja, las plantas de las zonas altas no se quedan sin agua y las de las zonas bajas no se ahogan. Además, un terreno nivelado necesita menos agua para regar el campo completo.</p>
+  <div class="cols">
+    <div class="card">
+      <h3 style="margin-top:0">Problema</h3>
+      <p>Nivelar exige mover tierra de las zonas altas a las bajas en muchos viajes. El volumen total a mover es fijo. Lo único que cambia es el <b>orden</b> de los viajes y, con él, la distancia que la máquina recorre en vacío entre un viaje y el siguiente.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Objetivo</h3>
+      <p>Nivelar un terreno irregular minimizando la distancia total recorrida por la maquinaria. El terreno objetivo no es plano, es un plano inclinado, porque el riego por gravedad necesita pendiente.</p>
+    </div>
+  </div>
+  <p class="note">Fuentes: INDEC, Intercambio comercial argentino 2025 (rubros de exportación); Bolsa de Comercio de Rosario (valor agregado de las cadenas agroindustriales).</p>
+</section>
+
+<section id="arquitectura">
+  <h2>Arquitectura de la solución</h2>
+  <p>El sistema tiene cuatro módulos en cadena. Los tres primeros preparan el problema y el último es el agente, que es el núcleo de IA.</p>
+  <svg viewBox="0 0 930 120" role="img" aria-label="Pipeline de cuatro módulos: generador de terrenos, problema de transporte, creador de viajes y agente DQN" style="width:100%;height:auto">
+    <defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#F4F8DC" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+    <g>
+      <rect x="10" y="20" width="190" height="80" rx="12" fill="#1B4A38" stroke="#3E6B58"/>
+      <text x="105" y="52" text-anchor="middle" fill="#F4F8DC" font-size="16" font-weight="600">Generador</text>
+      <text x="105" y="72" text-anchor="middle" fill="#BFD8CB" font-size="13">terreno 8×8 + objetivo</text>
+      <rect x="250" y="20" width="190" height="80" rx="12" fill="#1B4A38" stroke="#3E6B58"/>
+      <text x="345" y="52" text-anchor="middle" fill="#F4F8DC" font-size="16" font-weight="600">Transporte</text>
+      <text x="345" y="72" text-anchor="middle" fill="#BFD8CB" font-size="13">flujo de costo mínimo</text>
+      <rect x="490" y="20" width="190" height="80" rx="12" fill="#1B4A38" stroke="#3E6B58"/>
+      <text x="585" y="52" text-anchor="middle" fill="#F4F8DC" font-size="16" font-weight="600">Viajes</text>
+      <text x="585" y="72" text-anchor="middle" fill="#BFD8CB" font-size="13">capacidad de 5 por viaje</text>
+      <rect x="730" y="20" width="190" height="80" rx="12" fill="#F4F8DC" stroke="#F4F8DC"/>
+      <text x="825" y="52" text-anchor="middle" fill="#0E2A1F" font-size="16" font-weight="600">Agente DQN</text>
+      <text x="825" y="72" text-anchor="middle" fill="#0E2A1F" font-size="13">ordena los viajes</text>
+    </g>
+    <line x1="204" y1="60" x2="246" y2="60" stroke="#F4F8DC" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="444" y1="60" x2="486" y2="60" stroke="#F4F8DC" stroke-width="2" marker-end="url(#ar)"/>
+    <line x1="684" y1="60" x2="726" y2="60" stroke="#F4F8DC" stroke-width="2" marker-end="url(#ar)"/>
+  </svg>
+  <ol class="tight">
+    <li><b>Generador de terrenos:</b> Crea, a partir de una seed, un terreno irregular con ruido de Perlin y el terreno objetivo (un plano inclinado con el mismo volumen total de tierra).</li>
+    <li><b>Problema de transporte:</b> Decide qué zonas altas rellenan qué zonas bajas, resolviendo un flujo de costo mínimo con NetworkX.</li>
+    <li><b>Creador de viajes:</b> Convierte esos flujos en viajes concretos, porque una zona alta puede rellenar varias bajas y al revés. Cada viaje es un origen, un destino y un volumen de hasta 5.</li>
+    <li><b>Agente DQN:</b> Elige en qué orden hacer los viajes para minimizar la distancia total.</li>
+  </ol>
+  <h3>Definición PEAS</h3>
+  <div class="scroll">
+  <table>
+    <tr><th>Componente</th><th>Descripción</th></tr>
+    <tr><td><b>P</b> (Performance)</td><td>Minimizar el costo total, que es la distancia en vacío más la distancia con carga, y cerrar la brecha entre el greedy y la referencia.</td></tr>
+    <tr><td><b>E</b> (Entorno)</td><td>Terreno de 8×8 celdas con un plano objetivo inclinado y una lista de viajes de corte y relleno.</td></tr>
+    <tr><td><b>A</b> (Actuadores)</td><td>Elegir el próximo viaje pendiente. La máquina se desplaza al origen, carga y descarga en el destino.</td></tr>
+    <tr><td><b>S</b> (Sensores)</td><td>Posición de la máquina y, por cada viaje, origen, destino, volumen y distancia al origen, más una máscara de viajes pendientes.</td></tr>
+  </table>
+  </div>
+</section>
+
+<section id="agente">
+  <h2>Cómo decide el agente</h2>
+  <p>En cada paso el agente puntúa todos los viajes pendientes con una red neuronal, elige el de mayor valor Q y lo ejecuta. La recompensa penaliza la distancia recorrida en vacío y es lo que actualiza la red.</p>
+  <svg viewBox="0 0 930 230" role="img" aria-label="Flujo de decisión: viajes pendientes, red Q, valor Q por viaje y acción; la recompensa vuelve a la red" style="width:100%;height:auto">
+    <defs><marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="#F4F8DC" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+    <rect x="10" y="10" width="190" height="140" rx="12" fill="#1B4A38" stroke="#3E6B58"/>
+    <text x="105" y="36" text-anchor="middle" fill="#F4F8DC" font-size="16" font-weight="600">Viajes pendientes</text>
+    <rect x="35" y="52" width="140" height="24" rx="12" fill="#123527" stroke="#3E6B58"/><text x="105" y="69" text-anchor="middle" fill="#F4F8DC" font-size="13">Viaje 1</text>
+    <rect x="35" y="82" width="140" height="24" rx="12" fill="#123527" stroke="#3E6B58"/><text x="105" y="99" text-anchor="middle" fill="#F4F8DC" font-size="13">Viaje 2</text>
+    <rect x="35" y="112" width="140" height="24" rx="12" fill="#123527" stroke="#3E6B58"/><text x="105" y="129" text-anchor="middle" fill="#F4F8DC" font-size="13">Viaje 3 + posición</text>
+    <rect x="250" y="10" width="190" height="140" rx="12" fill="#F4F8DC"/>
+    <text x="345" y="66" text-anchor="middle" fill="#0E2A1F" font-size="18" font-weight="600">Red Q</text>
+    <text x="345" y="92" text-anchor="middle" fill="#0E2A1F" font-size="13">la misma red puntúa</text>
+    <text x="345" y="110" text-anchor="middle" fill="#0E2A1F" font-size="13">cada viaje</text>
+    <rect x="490" y="10" width="190" height="140" rx="12" fill="#1B4A38" stroke="#3E6B58"/>
+    <text x="585" y="36" text-anchor="middle" fill="#F4F8DC" font-size="16" font-weight="600">Valor Q por viaje</text>
+    <rect x="535" y="100" width="28" height="30" rx="3" fill="#3E6B58"/>
+    <rect x="571" y="62" width="28" height="68" rx="3" fill="#F4F8DC"/>
+    <rect x="607" y="82" width="28" height="48" rx="3" fill="#3E6B58"/>
+    <text x="549" y="145" text-anchor="middle" fill="#BFD8CB" font-size="12">V1</text>
+    <text x="585" y="145" text-anchor="middle" fill="#BFD8CB" font-size="12">V2</text>
+    <text x="621" y="145" text-anchor="middle" fill="#BFD8CB" font-size="12">V3</text>
+    <rect x="730" y="10" width="190" height="140" rx="12" fill="#1B4A38" stroke="#3E6B58"/>
+    <text x="825" y="66" text-anchor="middle" fill="#F4F8DC" font-size="18" font-weight="600">Acción</text>
+    <text x="825" y="92" text-anchor="middle" fill="#BFD8CB" font-size="13">ejecuta el viaje</text>
+    <text x="825" y="110" text-anchor="middle" fill="#BFD8CB" font-size="13">de mayor Q</text>
+    <line x1="204" y1="80" x2="246" y2="80" stroke="#F4F8DC" stroke-width="2" marker-end="url(#ar2)"/>
+    <line x1="444" y1="80" x2="486" y2="80" stroke="#F4F8DC" stroke-width="2" marker-end="url(#ar2)"/>
+    <line x1="684" y1="80" x2="726" y2="80" stroke="#F4F8DC" stroke-width="2" marker-end="url(#ar2)"/>
+    <path d="M825 154 V190 H345 V158" fill="none" stroke="#F4F8DC" stroke-width="2" marker-end="url(#ar2)"/>
+    <text x="585" y="214" text-anchor="middle" fill="#F4F8DC" font-size="13">recompensa: menos distancia en vacío → actualiza la red</text>
+  </svg>
+  <h3>Qué aprendió el diseño a lo largo de las versiones</h3>
+  <ul class="tight">
+    <li><b>Base:</b> Una red que recibe todo el estado junto, la posición de la máquina y los datos de todos los viajes, y devuelve un valor Q por viaje. Aprende cada lugar de la lista por separado.</li>
+    <li><b>Red por viaje:</b> Una misma red pequeña puntúa cada viaje con los mismos pesos para todos. Lo que aprende sobre un viaje sirve para cualquier otro y no depende del orden de la lista.</li>
+    <li><b>Recompensa en vacío:</b> Se quitó de la recompensa la distancia con carga, porque es igual para cualquier orden y solo agrega ruido.</li>
+    <li><b>Lookahead:</b> Para cada viaje se suman dos datos sobre lo que quedaría pendiente después de hacerlo: La distancia desde su destino al origen más cercano y al centro de los orígenes restantes.</li>
+    <li><b>Gamma bajo:</b> Gamma es el factor de descuento, que define cuánto pesa el futuro. Con 0.99 cada decisión depende de la estimación de decenas de viajes siguientes, muy ruidosa. Con 0.39 el agente mira pocos viajes adelante y el entrenamiento es estable.</li>
+    <li><b>Double DQN:</b> Una red elige la mejor acción y otra la evalúa, para evitar sobreestimar los valores Q. No cambió el resultado.</li>
+  </ul>
+</section>
+
+<section id="experimentos">
+  <h2>Experimentos y resultados</h2>
+  <h3 style="margin-top:0">Cómo se evalúa</h3>
+  <ul class="tight">
+    <li><b>Seeds separadas:</b> 0–99 para test, 100–149 para validación (elegir el modelo y cortar el entrenamiento) y 150 en adelante para entrenar.</li>
+    <li><b>Repetición:</b> Cada variante se entrenó 5 veces de forma independiente, con 1000 episodios. El ± es el desvío entre esas 5.</li>
+    <li><b>Comparación:</b> El <i>greedy</i> siempre va al viaje cuyo origen está más cerca de la máquina. La <i>referencia</i> es la mejor solución conocida, obtenida con una búsqueda local que mejora el orden de los viajes. No se probó que sea el óptimo.</li>
+    <li><b>Brecha cerrada:</b> <code>(greedy − agente) / (greedy − referencia)</code>. 0% es igual al greedy y 100% es igual a la referencia.</li>
+  </ul>
+  <p class="note">En test: greedy 355.44 y referencia 348.15.</p>
+  <div class="scroll">
+  <table>
+    <tr><th>#</th><th>Variante</th><th>Gamma</th><th class="num">Costo en test</th><th class="num">Brecha cerrada</th></tr>
+    <tr><td>1</td><td>Base (red plana)</td><td>0.99</td><td class="num">386.74 ± 1.89</td><td class="num">−429.4% ± 25.9%</td></tr>
+    <tr><td>2</td><td>Red por viaje</td><td>0.99</td><td class="num">356.52 ± 0.70</td><td class="num">−14.8% ± 9.6%</td></tr>
+    <tr><td>3</td><td>+ recompensa en vacío</td><td>0.99</td><td class="num">355.28 ± 0.38</td><td class="num">2.2% ± 5.2%</td></tr>
+    <tr><td>4</td><td>+ lookahead</td><td>0.99</td><td class="num">356.22 ± 0.57</td><td class="num">−10.7% ± 7.9%</td></tr>
+    <tr><td>5</td><td>Gamma 0.5, sin lookahead</td><td>0.5</td><td class="num">355.29 ± 0.23</td><td class="num">2.1% ± 3.1%</td></tr>
+    <tr><td>6</td><td>Lookahead + gamma 0.5</td><td>0.5</td><td class="num">353.66 ± 0.14</td><td class="num">24.4% ± 1.9%</td></tr>
+    <tr class="best"><td>7</td><td>Lookahead + gamma 0.39</td><td>0.39</td><td class="num">353.31 ± 0.13</td><td class="num">29.2% ± 1.7%</td></tr>
+    <tr><td>8</td><td>Lookahead + gamma 0.39 + Double DQN</td><td>0.39</td><td class="num">353.32 ± 0.10</td><td class="num">29.1% ± 1.3%</td></tr>
+  </table>
+  </div>
+  <figure>
+    <img class="fig" src="assets/comparacion.png" alt="Curvas de costo de validación durante el entrenamiento, costo en test por variante y episodios entrenados">
+    <figcaption>Izquierda: costo en validación durante el entrenamiento. Centro: costo en test por variante (una marca por seed). Derecha: episodios entrenados.</figcaption>
+  </figure>
+  <h3>Qué muestran los resultados</h3>
+  <ul class="tight">
+    <li><b>Ni el lookahead ni el gamma bajo alcanzan por separado.</b> Con gamma 0.99 el lookahead empeora (fila 4), y con gamma 0.5 sin lookahead el agente queda igual que el greedy (fila 5). Solo la combinación supera al greedy.</li>
+    <li><b>El costo de validación empeora al entrenar con gamma 0.99.</b> El mejor modelo aparece cerca del episodio 100. Una explicación consistente con los resultados: con gamma alto el objetivo de aprendizaje depende de estimaciones de largo plazo que acumulan error, y ese ruido tapa la señal, porque la diferencia entre un buen y un mal orden es de apenas ~2% del costo. Es una interpretación, no se probó de forma aislada.</li>
+    <li><b>Hay poco margen sobre el greedy.</b> La referencia reduce el costo solo un 2.05% respecto del greedy, y el agente lo reduce un 0.60% (355.44 → 353.31). Por eso la meta del Project Charter, una reducción de al menos 20%, se redefinió como brecha cerrada: el agente cierra el 29.2% de la distancia entre el greedy y la referencia.</li>
+  </ul>
+</section>
+
+<section id="demo">
+  <h2>Demo interactiva</h2>
+  <p>Elegí un terreno de test y mirá cómo el agente y el greedy hacen los mismos viajes en distinto orden. Los viajes son los mismos, así que el costo de las partes cargadas es igual y la diferencia está en los traslados en vacío.</p>
+  <p class="note">Esta demo reproduce soluciones calculadas de antemano con el modelo entrenado del repositorio sobre las seeds de test 0 a 99. No ejecuta el modelo en el navegador. Para correr el modelo en vivo, usá la API con Docker o el notebook <code>notebooks/demo.ipynb</code>.</p>
+
+  <div id="demo-app">
+    <div class="demo-controls">
+      <label for="seed">Terreno</label>
+      <select id="seed"></select>
+      <button id="prev" type="button" aria-label="Seed anterior">←</button>
+      <button id="next" type="button" aria-label="Seed siguiente">→</button>
+      <button id="azar" type="button">Aleatoria</button>
+    </div>
+    <div class="kpis" id="kpi"></div>
+
+    <div class="demo-controls">
+      <button id="play" class="primary" type="button">Reproducir</button>
+      <button id="reiniciar" type="button">Reiniciar</button>
+      <button id="final" type="button">Ir al final</button>
+      <label for="vel">Velocidad</label>
+      <select id="vel">
+        <option value="900">Lenta</option>
+        <option value="450" selected>Normal</option>
+        <option value="180">Rápida</option>
+      </select>
+    </div>
+    <div class="demo-controls">
+      <label for="paso">Viaje</label>
+      <input id="paso" type="range" min="0" max="30" value="0" step="1" style="flex:1;min-width:200px">
+    </div>
+    <p id="info-paso" class="note" aria-live="polite"></p>
+
+    <div class="panels">
+      <div class="panel"><h3>Agente DQN</h3><canvas id="canvas-agente" aria-label="Terreno y recorrido del agente"></canvas></div>
+      <div class="panel"><h3>Greedy</h3><canvas id="canvas-greedy" aria-label="Terreno y recorrido del greedy"></canvas></div>
+    </div>
+    <div class="legend">
+      <span><i class="sw" style="background:rgba(232,121,90,.8)"></i>sobra tierra (hay que sacar)</span>
+      <span><i class="sw" style="background:rgba(95,199,168,.8)"></i>falta tierra (hay que rellenar)</span>
+      <span><i class="sw" style="background:#F2A33A"></i>viaje actual (punteado: traslado en vacío)</span>
+      <span><i class="sw" style="background:rgba(191,216,203,.5)"></i>viajes anteriores</span>
+      <span><i class="sw" style="background:#F4F8DC;border-radius:50%"></i>máquina</span>
+    </div>
+    <p class="note">Cada celda muestra la diferencia entre la altura actual y la del terreno objetivo. Al terminar todos los viajes queda en cero.</p>
+
+    <div class="panel" style="margin-top:12px">
+      <h3>Costo acumulado</h3>
+      <canvas id="canvas-curva" aria-label="Costo acumulado del agente y del greedy por viaje"></canvas>
+      <div class="legend"><span><i class="sw" style="background:#F4F8DC"></i>agente</span><span><i class="sw" style="background:#9DB4A9"></i>greedy</span></div>
+    </div>
+    <p id="resumen-global" class="note" style="margin-top:12px"></p>
+  </div>
+</section>
+
+<section id="reproducir">
+  <h2>Reproducir los resultados</h2>
+  <p>Todo el código, los tests y la documentación completa están en el repositorio. El proyecto usa entorno virtual o Docker, dependencias con versiones fijas y una seed en cada proceso aleatorio.</p>
+  <pre><code>git clone https://github.com/fabribiondi2002/trabajo_final_IA
+cd trabajo_final_IA
+python -m venv venv &amp;&amp; source venv/bin/activate
+pip install -r requirements.txt
+pytest
+
+# entrenar la mejor variante (lookahead + gamma 0.39)
+python -m src.experiment --lr 3e-4 --peso-distancia 10 --gamma 0.39 \
+  --arquitectura por_viaje --recompensa vacio --lookahead --paciencia 4 \
+  --carpeta models/lookahead_g039_paciencia</code></pre>
+  <p>El README tiene los comandos de las ocho variantes, cómo levantar la API con Docker y cómo usar el notebook.</p>
+  <div class="cols">
+    <div class="card">
+      <h3 style="margin-top:0">Ingeniería de soporte</h3>
+      <ul class="tight">
+        <li>API REST con FastAPI, validación con Pydantic y logging estructurado.</li>
+        <li>Imagen Docker lista para levantar la API.</li>
+        <li>Tests automatizados con pytest.</li>
+        <li>Trazabilidad de experimentos: cada corrida guarda su historial y su configuración.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Limitaciones</h3>
+      <ul class="tight">
+        <li>El margen sobre el greedy es chico (la referencia mejora solo ~2%).</li>
+        <li>Terrenos sintéticos de 8×8 con hasta 50 viajes.</li>
+        <li>Los resultados pueden variar levemente entre computadoras por diferencias numéricas.</li>
+        <li>La referencia es la mejor solución conocida, no un óptimo demostrado.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  Leandro Fabrizio Biondi · Inteligencia Artificial, IUA Córdoba · Docente: Ing. Hernando Alexis González · 2026<br>
+  <a href="https://github.com/fabribiondi2002/trabajo_final_IA">Repositorio en GitHub</a>
+</footer>
+
+<script src="demo.js"></script>
 </body>
 </html>
